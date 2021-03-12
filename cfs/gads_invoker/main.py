@@ -1,4 +1,4 @@
-"""Google Cloud function that process the GADS conv. upload response"""
+"""Google Cloud function that uploads the conversion to GADS"""
 
 # Copyright 2020 Google LLC
 #
@@ -33,25 +33,17 @@ from google.cloud import firestore
 
 import pytz
 
-def _init_firestore_collections(payload: Dict[str, Any]):
-  """Create and initialises the file firestore structure
+
+
+def main(request):
+  """Triggers the conversion upload.
 
   Args:
-    payload:  The pubsub message payload
-  """
-
-
-def main(event: Dict[str, Any],
-         context=Optional[Context]):
-  """Triggers the message processing.
-
-  Args:
-    event (dict):  The dictionary with data specific to this type of event. The
-      `data` field contains the PubsubMessage message. The `attributes` field
-      will contain custom attributes if there are any.
-    context (google.cloud.functions.Context): The Cloud Functions event
-      metadata. The `event_id` field contains the Pub/Sub message ID. The
-      `timestamp` field contains the publish time.
+    request (flask.Request): HTTP request object.
+  Returns:
+        The response text or any set of values that can be turned into a
+        Response object using
+        `make_response <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
   """
   del context
   
