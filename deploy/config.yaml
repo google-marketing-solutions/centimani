@@ -26,6 +26,10 @@ DEFAULT_GCP_PROJECT: 'hectorparra-test'
 # Type gcloud compute regions list to find out the different values
 DEFAULT_GCP_REGION: 'europe-west1'
 
+# GCS settings
+# =====================================================================
+DEFAULT_GCS_BUCKET: 'test_conversions_import'
+MAX_CHUNK_LINES: '2000'
 
 # BQ settings
 # =====================================================================

@@ -31,6 +31,19 @@ function create_pubsub_topic() {
 }
 
 
+function create_gcs_bucket() {
+  local BUCKET_NAME=$1
+  local DEFAULT_GCP_REGION=$2
+  GS_BUCKET_EXISTS=$(gsutil ls | grep "gs://${BUCKET_NAME}/")
+  if [[ -z "$GS_BUCKET_EXISTS" ]] || [[ "$GS_BUCKET_EXISTS" == "" ]]
+  then
+    gsutil mb -b on -l ${DEFAULT_GCP_REGION} "gs://${BUCKET_NAME}/"
+  else
+    echo "Bucket '$1' already exists. Ignoring."
+  fi
+}
+
+
 function parse_yaml {
    local prefix=$2
    local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
