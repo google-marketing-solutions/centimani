@@ -1,0 +1,47 @@
+# Configuration file for the generic part of the framework
+#
+# Copyright 2020 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# General settings
+# =====================================================================
+DEPLOYMENT_NAME: 'ego_cogito'
+SOLUTION_PREFIX: 'massive_uploader'
+# Service account for the deployment. It must be granted in all the GCP projects used
+SERVICE_ACCOUNT: 'hectorparra-test@appspot.gserviceaccount.com'
+# Project for pub/sub & firestore
+DEFAULT_GCP_PROJECT: 'hectorparra-test'
+# Type gcloud compute regions list to find out the different values
+DEFAULT_GCP_REGION: 'europe-west1'
+
+
+# BQ settings
+# =====================================================================
+
+
+# Polling & throttling settings
+# =====================================================================
+
+
+# Pub/Sub
+# =====================================================================
+# Cloud Pub/Sub settings (It will be automatically prefixed by DEPLOYMENT_NAME.SOLUTION_PREFIX)
+
+GADS_RESPONSE_HANDLER_TOPIC: 'ego_cogito.massive_uploader.gads_response'
+
+# Firestore 
+# =====================================================================
+
+
