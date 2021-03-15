@@ -105,6 +105,7 @@ function enable_services {
     endpoints.googleapis.com \
     bigquery.googleapis.com \
     bigquerydatatransfer.googleapis.com \
+    cloudtasks.googleapis.com \
     --format "none"
 }
 
