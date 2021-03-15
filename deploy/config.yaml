@@ -26,6 +26,12 @@ DEFAULT_GCP_PROJECT: 'hectorparra-test'
 # Type gcloud compute regions list to find out the different values
 DEFAULT_GCP_REGION: 'europe-west1'
 
+# Cloud Function names
+# =====================================================================
+CF_NAME_SLICER: 'file_slicer'
+CF_NAME_INVOKER: 'gads_invoker'
+CF_NAME_HANDLER: 'gads_response_handler'
+
 # GCS settings
 # =====================================================================
 DEFAULT_GCS_BUCKET: 'test_conversions_import'

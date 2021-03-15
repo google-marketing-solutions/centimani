@@ -15,8 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-CF_NAME="file_slicer"
 CONFIG_PATH="../../deploy/config.yaml"
 HELPERS_PATH="../../deploy/helpers.sh"
 MEMORY="256MB"
@@ -25,6 +23,7 @@ TIMEOUT="540"
 source "$HELPERS_PATH"
 eval "$(parse_yaml $CONFIG_PATH)"
 
+CF_NAME = $CF_NAME_SLICER
 CFG_FILE=$(cat $CONFIG_PATH $CUSTOM_CONFIG_PATH > ./__config.yaml)
 
 create_gcs_bucket $DEFAULT_GCS_BUCKET $DEFAULT_GCP_REGION
