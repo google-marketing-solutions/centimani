@@ -27,13 +27,11 @@ function deploy_solution {
   gcloud config set project "$DEFAULT_GCP_PROJECT"
   gcloud config set compute/region "$DEFAULT_GCP_REGION"
 
-  # Begin deploying pLTV
-
-  enable_services
+  #enable_services
   echo "**************************************************************"
   echo "* Services Enabled. Waiting for changes to be applied...     *"
   echo "**************************************************************"
-  sleep 30
+  #sleep 30
   #create_service_account
   echo "**************************************************************"
   echo "* Service Account Created.                                   *"
@@ -42,15 +40,15 @@ function deploy_solution {
   echo "**************************************************************"
   echo "* Account Permissions Set.                                   *"
   echo "**************************************************************"
-  deploy_cloud_functions
+  #deploy_cloud_functions
   echo "**************************************************************"
   echo "* Cloud Functions Successfully Deployed.                     *"
   echo "**************************************************************"
-  #create_schedulers
+  create_schedulers
   echo "**************************************************************"
   echo "* Schedulers Successfully Deployed.                          *"
   echo "**************************************************************"
-  # populate_bq
+  create_bq_dataset
   echo "**************************************************************"
   echo "**************************************************************"
   echo " IMPORTANT: run the post deployment tasks explained in the doc!"
@@ -122,11 +120,11 @@ function deploy_cloud_functions {
 function create_schedulers {
     PREFIX="$DEPLOYMENT_NAME.$SOLUTION_PREFIX"
 
-    SC1=$(gcloud scheduler jobs create pubsub "$DEPLOYMENT_NAME"_"$SOLUTION_PREFIX"_model_stopper \
-    --schedule "${MODEL_STOPPER_POLLER_CONFIG//\\/}" \
+    SC1=$(gcloud scheduler jobs create pubsub "$DEPLOYMENT_NAME"_"$SOLUTION_PREFIX"_reporting_data \
+    --schedule "${REPORTING_DATA_POLLING_CONFIG//\\/}" \
     --time-zone "$TIMEZONE" \
     --topic "$STOP_MODEL_TOPIC" \
-    --message-body "It's Model Stop Time!" \
+    --message-body "It's Reporting Time!" \
     --format "none")
     echo "$SC1"
     ERROR=$(echo "$SC1" | grep -Po "error")
@@ -138,38 +136,6 @@ function create_schedulers {
           echo "INFO: Stopper scheduler already exists."
       else
           echo "$SC1"
-          exit -1
-      fi
-    fi
-    SC2=$(gcloud scheduler jobs create pubsub "$DEPLOYMENT_NAME"_"$SOLUTION_PREFIX"_periodic_transactions_poller \
-    --schedule "${DATA_SOURCE_PERIODIC_TX_POLLER_CONFIG//\\/}" \
-    --time-zone "$TIMEZONE" \
-    --topic "$POLLING_PERIODIC_TX_TOPIC" \
-    --message-body "It's Poll Tx Time!" \
-    --format "none")
-    ERROR=$(echo "$SC2" | grep -Po "error")
-    if [[ "$ERROR" == "error" ]]; then
-      EXISTS=$(echo "$SC2" | grep -Po "exists")
-      if [[ "$EXISTS" == "exists" ]]; then
-          echo "INFO: periodic tx scheduler already exists."
-      else
-          echo "$SC2"
-          exit -1
-      fi
-    fi
-    SC3=$(gcloud scheduler jobs create pubsub "$DEPLOYMENT_NAME"_"$SOLUTION_PREFIX"_long_running_tasks_poller \
-    --schedule "${LONG_RUNNING_TASKS_POLLER_CONFIG//\\/}" \
-    --time-zone "$TIMEZONE" \
-    --topic "$POLLING_LONG_RUNNING_TASKS_TOPIC" \
-    --message-body "It's Poll Task Time!" \
-    --format "none")
-    ERROR=$(echo "$SC3" | grep -Po "error")
-    if [[ "$ERROR" == "error" ]]; then
-      EXISTS=$(echo "$SC3" | grep -Po "exists")
-      if [[ "$EXISTS" == "exists" ]]; then
-          echo "INFO: Long Running Tasks scheduler already exists."
-      else
-          echo "$SC3"
           exit -1
       fi
     fi
@@ -216,13 +182,38 @@ function set_service_account_permissions {
 
 }
 
+function create_bq_dataset {
+  if [[ "$SKIP_DATASET_CREATION" == "N" ]]; then
+    CREATE_DATASET=$(bq mk -d \
+    --location "$BQ_GCP_BROAD_REGION" \
+    "$DEFAULT_GCP_PROJECT:$BQ_REPORTING_DATASET"
+    )
+    ERROR=$(echo "$CREATE_DATASET" | grep -Po "error")
+    #echo $ERROR
+    if [[ "$ERROR" == "error" ]]; then
+      EXISTS=$(echo "$CREATE_DATASET" | grep -Po "exists")
+      if [[ "$EXISTS" == "exists" ]]; then
+          echo "INFO: Dataset $BQ_REPORTING_DATASET Already exists."
+      else
+          echo "$CREATE_DATASET"
+          exit -1
+      fi
+    else
+      echo "***************************************************************"
+      echo "* BQ Dataset Successfully Deployed. Waiting to be available.  *"
+      echo "***************************************************************"
+      sleep 30
+    fi
+  fi
+}
+
 # Print the completion message once pLTV has been deployed.
 function print_completion_message {
   echo "
 <><><><><><><><><><><><><><><><><><><>
 "
   print_pltv_scaffolding_logo
-  echo "$DEPLOY_NAME.$SOLUTION_NAME pLTV scaffolding has now been deployed.
+  echo "$DEPLOY_NAME.$SOLUTION_NAME Massive Conversions Uploader has now been deployed.
 Please check the logs for any errors. If there are none, you're all set up!
 "
 }
