@@ -48,7 +48,7 @@ function deploy_solution {
   echo "**************************************************************"
   echo "* Schedulers Successfully Deployed.                          *"
   echo "**************************************************************"
-  create_bq_dataset
+  #create_bq_dataset
   echo "**************************************************************"
   echo "**************************************************************"
   echo " IMPORTANT: run the post deployment tasks explained in the doc!"
@@ -120,12 +120,18 @@ function deploy_cloud_functions {
 function create_schedulers {
     PREFIX="$DEPLOYMENT_NAME.$SOLUTION_PREFIX"
 
-    SC1=$(gcloud scheduler jobs create pubsub "$DEPLOYMENT_NAME"_"$SOLUTION_PREFIX"_reporting_data \
+    OUTBOUND_TOPIC_NAME="$PREFIX.$REPORTING_DATA_EXTRACTOR_TOPIC"
+
+    create_pubsub_topic "$OUTBOUND_TOPIC_NAME"
+
+    SC1=$(gcloud scheduler jobs create pubsub "$DEPLOYMENT_NAME""_""$SOLUTION_PREFIX""_reporting_data" \
     --schedule "${REPORTING_DATA_POLLING_CONFIG//\\/}" \
-    --time-zone "$TIMEZONE" \
-    --topic "$STOP_MODEL_TOPIC" \
+    --topic "$OUTBOUND_TOPIC_NAME" \
+    --time-zone "${TIMEZONE//\\/}" \
     --message-body "It's Reporting Time!" \
-    --format "none")
+    --format "none"
+    )
+
     echo "$SC1"
     ERROR=$(echo "$SC1" | grep -Po "error")
     echo "$ERROR"

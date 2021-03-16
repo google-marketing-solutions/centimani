@@ -16,7 +16,7 @@
 # limitations under the License.
 #
 
-CF_NAME="reporting_data_extractor"
+
 CONFIG_PATH="../../deploy/config.yaml"
 HELPERS_PATH="../../deploy/helpers.sh"
 MEMORY="512MB"
@@ -25,20 +25,13 @@ TIMEOUT="540"
 source "$HELPERS_PATH"
 eval "$(parse_yaml $CONFIG_PATH)"
 
+CF_NAME=$CF_NAME_REPORTING_DATA_EXTRACTOR
 INBOUND_TOPIC_NAME=$REPORTING_DATA_EXTRACTOR_TOPIC
 
 SUB=$(cat $CONFIG_PATH |  grep -P REPORTING_DATA_EXTRACTOR_TOPIC)
 
 PREFIX="$DEPLOYMENT_NAME.$SOLUTION_PREFIX"
-echo "$PREFIX"
-echo "$SUB"
-
-if [[ "$SUB" == *"$PREFIX"* ]]; then
-    echo "Inbound Topic already changed in config.yaml. Skipping..."
-else
-    sed -i "s/REPORTING_DATA_EXTRACTOR_TOPIC.*/REPORTING_DATA_EXTRACTOR_TOPIC: '$PREFIX.$INBOUND_TOPIC_NAME'/" "$CONFIG_PATH"
-    INBOUND_TOPIC_NAME=$PREFIX.$INBOUND_TOPIC_NAME
-fi
+INBOUND_TOPIC_NAME="$PREFIX.$INBOUND_TOPIC_NAME"
 
 create_pubsub_topic "$INBOUND_TOPIC_NAME"
 

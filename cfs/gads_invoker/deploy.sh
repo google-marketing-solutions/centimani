@@ -16,7 +16,7 @@
 # limitations under the License.
 #
 
-CF_NAME="gads_invoker"
+
 CONFIG_PATH="../../deploy/config.yaml"
 HELPERS_PATH="../../deploy/helpers.sh"
 MEMORY="512MB"
@@ -25,20 +25,11 @@ TIMEOUT="540"
 source "$HELPERS_PATH"
 eval "$(parse_yaml $CONFIG_PATH)"
 
+CF_NAME=$CF_NAME_GADS_INVOKER
 OUTBOUND_TOPIC_NAME=$GADS_RESPONSE_HANDLER_TOPIC
 
-SUB=$(cat $CONFIG_PATH |  grep -P GADS_RESPONSE_HANDLER_TOPIC)
-
 PREFIX="$DEPLOYMENT_NAME.$SOLUTION_PREFIX"
-echo "$PREFIX"
-echo "$SUB"
-
-if [[ "$SUB" == *"$PREFIX"* ]]; then
-    echo "Outbound Topic already changed in config.yaml. Skipping..."
-else
-    sed -i "s/GADS_RESPONSE_HANDLER_TOPIC.*/GADS_RESPONSE_HANDLER_TOPIC: '$PREFIX.$OUTBOUND_TOPIC_NAME'/" "$CONFIG_PATH"
-    OUTBOUND_TOPIC_NAME=$PREFIX.$OUTBOUND_TOPIC_NAME
-fi
+OUTBOUND_TOPIC_NAME="$PREFIX.$OUTBOUND_TOPIC_NAME"
 
 create_pubsub_topic "$OUTBOUND_TOPIC_NAME"
 

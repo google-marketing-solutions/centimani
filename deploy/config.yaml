@@ -29,8 +29,9 @@ DEFAULT_GCP_REGION: 'europe-west1'
 # Cloud Function names
 # =====================================================================
 CF_NAME_SLICER: 'file_slicer'
-CF_NAME_INVOKER: 'gads_invoker'
-CF_NAME_HANDLER: 'gads_response_handler'
+CF_NAME_GADS_INVOKER: 'gads_invoker'
+CF_NAME_GADS_RESPONSE_HANDLER: 'gads_response_handler'
+CF_NAME_REPORTING_DATA_EXTRACTOR: 'reporting_data_extractor'
 
 # GCS settings
 # =====================================================================
@@ -53,8 +54,8 @@ REPORTING_DATA_POLLING_CONFIG: '\*/5 \* \* \* \*'
 # =====================================================================
 # Cloud Pub/Sub settings (It will be automatically prefixed by DEPLOYMENT_NAME.SOLUTION_PREFIX)
 
-GADS_RESPONSE_HANDLER_TOPIC: 'ego_cogito.massive_uploader.gads_response'
-REPORTING_DATA_EXTRACTOR_TOPIC: 'ego_cogito.massive_uploader.extract_report_data'
+GADS_RESPONSE_HANDLER_TOPIC: 'gads_response'
+REPORTING_DATA_EXTRACTOR_TOPIC: 'extract_report_data'
 
 # Firestore 
 # =====================================================================
