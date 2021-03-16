@@ -16,3 +16,4 @@ functions-framework
 google.cloud.logging
 google-cloud-pubsub
 google-cloud-firestore
+google-cloud-datastore

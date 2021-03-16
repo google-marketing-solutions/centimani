@@ -35,13 +35,13 @@ from google.cloud import datastore as store
 
 import pytz
 
-DEFAULT_GCP_PROJECT = os.getenv('DEFAULT_GCP_PROJECT', '')
+DEFAULT_GCP_PROJECT = os.getenv("DEFAULT_GCP_PROJECT", "")
 MAX_RETRIES = 3
 SLEEP_IN_SECONDS = 5
 
 
 def _is_partial_failure_error_present(response):
-    """Checks whether a response message has a partial failure error.
+  """Checks whether a response message has a partial failure error.
 
     In Python the partial_failure_error attr is always present on a response
     message and is represented by a google.rpc.Status message. So we can't
@@ -51,108 +51,80 @@ def _is_partial_failure_error_present(response):
 
     Args:
         response:  A MutateAdGroupsResponse message instance.
-
     Returns: A boolean, whether or not the response message has a partial
-        failure error.
-    """
-    partial_failure = getattr(response, "partial_failure_error", None)
-    code = getattr(partial_failure, "code", None)
-    
-    return code != 0
+      failure error.
+  """
+  partial_failure = getattr(response, "partial_failure_error", None)
+  code = getattr(partial_failure, "code", None)
+
+  return code != 0
+
 
 def _process_data(data: Dict[str, Any]) -> Dict[str, Any]:
   """Create and initialises the file firestore structure
 
   Args:
     data: a dictionary containing the information to store in Firestore
+
   Returns:
     A dictionary containing the input data + the error data
   """
-
-  response = data["conversions_api_response"]  
+  
+  response = data["conversions_api_response"]
   if _is_partial_failure_error_present(response):
-      print("Partial failures occurred. Details will be shown below.\n")
-      
-      partial_failure = getattr(response, "partial_failure_error", None)
-      error_details = getattr(partial_failure, "details", [])
+    print("Partial failures occurred. Details will be shown below.\n")
 
-      for error_detail in error_details:
-          failure_message = client.get_type("GoogleAdsFailure", version="v6")
-          failure_object = failure_message.FromString(error_detail.value)
-          data["child"]["num_errors"] = len(failure_object.errors)   
+    partial_failure = getattr(response, "partial_failure_error", None)
+    error_details = getattr(partial_failure, "details", [])
+
+    for error_detail in error_details:
+      failure_message = client.get_type("GoogleAdsFailure", version="v6")
+      failure_object = failure_message.FromString(error_detail.value)
+    data["child"]["num_errors"] = len(error_details)
   else:
     data["child"]["num_errors"] = 0
 
   return data
 
 
-def _insert_data_in_firestore(db: store.Client, data: Dict[str, Any]):
-  """Create and initialises the file firestore structure
-
-  Args:
-    db:  Firestore client
-    data: a dictionary containing the information to store in Firestore
-  """
-
-  db.collection(data["date"]).document(data["parent"]["file_name"]).set(data["parent"])
-  (db.collection(data["date"])
-    .document(data["parent"]["file_name"])
-    .collection("subfiles")
-    .document(data["child"]["file_name"])
-    .set(data["child"])
-  )
-
-
-def _upsert_processing_date_in_datastore(db: store.client.Client, data: Dict[str, Any]) -> store.key.Key:
+def _upsert_processing_date_in_datastore(db: store.client.Client,
+                                         data: Dict[str, Any]) -> store.key.Key:
   """Creates/updates the date entity
 
   Args:
     db:  Datastore client
     data: a dictionary containing the information to store in Datastore
-  """  
-  
-  date_key = db.key("processing_date", data["date"])
+  """
+
+  date_key = db.key("processing_date", data["processing_date"])
+
   with db.transaction():
     processing_date = store.Entity(key=date_key)
     db.put(processing_date)
 
   return date_key
 
-def _upsert_parent_file_in_datastore(db: store.Client, data: Dict[str, Any], date_key: store.key.Key) -> store.key.Key:
-  """Creates/updates the parent file
-
-  Args:
-    db:  Datastore client
-    data: a dictionary containing the information to store in Datastore
-    date_key: the key of the parent entity, in this case date
-  """
-  parent_key = db.key("parent_file", data["parent"]["file_name"], parent=date_key)
-  with db.transaction():
-    parent_file = store.Entity(key=parent_key)
-    parent_file.update(data["parent"])
-    db.put(parent_file)
-    
-  
-  return parent_key
-
-def _upsert_child_file_in_datastore(db: store.client.Client, data: Dict[str, Any], parent_file_key: store.key.Key) -> store.key.Key:
+def _upsert_child_file_in_datastore(
+    db: store.client.Client, data: Dict[str, Any],
+    parent_key: store.key.Key) -> store.key.Key:
   """Create and initialises the chile file datastore structure
 
   Args:
     db:  Datastore client
     data: a dictionary containing the information to store in Datastore
-    parent_file_key: the key of the parent file entity
+    date_key: the key of the date
   """
   with db.transaction():
-    child_key = db.key("child_file", data["child"]["file_name"], parent=parent_file_key)
+    child_key = db.key("child_file",
+                        data["child_file_name"],
+                        parent=parent_key)
     child_file = store.Entity(key=child_key)
-    child_file.update(data["child"])
+    child_file.update(data)
     db.put(child_file)
 
-  return child_key  
+  return child_key
 
 
- 
 def _insert_data_in_datastore(db: store.Client, data: Dict[str, Any]):
   """Create and initialises the datastore structure
 
@@ -160,23 +132,33 @@ def _insert_data_in_datastore(db: store.Client, data: Dict[str, Any]):
     db:  Datastore client
     data: a dictionary containing the information to store in Datastore
   """
-  
+
   for i in range(MAX_RETRIES):
     try:
-      # print(i)
-      date_key = _upsert_processing_date_in_datastore(db , data)
-      parent_file_key = _upsert_parent_file_in_datastore(db , data, date_key)
-      _upsert_child_file_in_datastore(db, data, parent_file_key)
+      date_key = _upsert_processing_date_in_datastore(db, data)
+      _upsert_child_file_in_datastore(db, data, date_key)
       break
     except Exception as e:
       print(e)
       time.sleep(SLEEP_IN_SECONDS)
 
+def _build_data_for_firestore(data: Dict[str, Any]) -> Dict[str, Any]:
+
+    return {
+    "cid": data["parent"]["cid"],
+    "processing_date": data["date"],
+    "parent_file_name": data["parent"]["file_name"],
+    "parent_file_path": data["parent"]["file_path"],
+    "parent_file_date": data["parent"]["file_date"],
+    "parent_total_files": data["parent"]["total_files"],
+    "parent_total_rows": data["parent"]["total_rows"],
+    "child_file_name": data["child"]["file_name"],
+    "child_num_rows": data["child"]["num_rows"],
+    "child_num_errors": data["child"]["num_errors"]
+  }
 
 
-
-def main(event: Dict[str, Any],
-         context=Optional[Context]):
+def main(event: Dict[str, Any], context=Optional[Context]):
   """Triggers the message processing.
 
   Args:
@@ -189,35 +171,38 @@ def main(event: Dict[str, Any],
   """
   del context
 
-  data = base64.b64decode(event['data'])
+  data = base64.b64decode(event["data"])
   input_data = json.loads(data)
 
   db = store.Client(DEFAULT_GCP_PROJECT)
 
   input_data = _process_data(input_data)
-  _insert_data_in_datastore(db, input_data)
+  _insert_data_in_datastore(db, 
+    _build_data_for_firestore(input_data)
+  )
   
-  
+
+
 def _test_main():
   data = {
-    "date": "20210310",
-    "parent": {
-    "cid": "1234",
-    "file_name": "parent_file_1",
-    "file_path": "gs://a/b/c",
-    "file_date": "20210310",
-    "total_files": "10",
-    "total_rows": "200"
-    },
-    "child": {
-      "file_name": "child_file_1",
-      "num_rows": "20"
-    },
-    "conversions_api_response": { }
+      "date": "20210316",
+      "parent": {
+          "cid": "1234",
+          "file_name": "parent_file_1",
+          "file_path": "gs://a/b/c",
+          "file_date": "20210310",
+          "total_files": 10,
+          "total_rows": 200
+      },
+      "child": {
+          "file_name": "child_file_1",
+          "num_rows": 20
+      },
+      "conversions_api_response": {}
   }
-  main(event={
-    "data": base64.b64encode(bytes(json.dumps(data).encode('utf-8')))
-  })
+  main(
+      event={"data": base64.b64encode(bytes(json.dumps(data).encode("utf-8")))})
+
 
 if __name__ == "__main__":
   _test_main()
