@@ -33,8 +33,6 @@ from google.cloud import firestore
 
 import pytz
 
-
-
 def main(request):
   """Triggers the conversion upload.
 
