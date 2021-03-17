@@ -90,6 +90,8 @@ def _get_bq_schema():
         ,bigquery.SchemaField("child_file_name","STRING",mode="REQUIRED")
         ,bigquery.SchemaField("child_num_rows","INT64",mode="REQUIRED")
         ,bigquery.SchemaField("child_num_errors","INT64",mode="REQUIRED")
+        ,bigquery.SchemaField("last_processed_timestamp","TIMESTAMP",mode="REQUIRED")
+
         ]
 
 
@@ -122,8 +124,13 @@ def _test_main():
       event={"data": base64.b64encode(bytes(json.dumps(data).encode("utf-8")))})
 
 def _test_get_data_from_datastore():
-  df = _get_data_from_datastore("20210316")
+  date = "20210316"
+  table_name = f"{DEFAULT_GCP_PROJECT}.{BQ_REPORTING_DATASET}.{BQ_REPORTING_TABLE}_{date}"
+  df = _get_data_from_datastore(date)
+ 
+  if len(df)>0:
+    _write_to_bigquery(df, table_name)
 
 
 if __name__ == "__main__":
-  _test_main()
+  _test_get_data_from_datastore()

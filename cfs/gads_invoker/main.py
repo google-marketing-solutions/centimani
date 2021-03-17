@@ -149,6 +149,8 @@ def _upload_conversions(input_json, project_id, reporting_topic, client,
     click_conversion.currency_code = conversion_info[4]
     conversions_list.append(click_conversion)
 
+  pubsub_payload = config
+                  
   try:
     conversion_upload_service = client.get_service(
         'ConversionUploadService', version='v6')

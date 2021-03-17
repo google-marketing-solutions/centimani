@@ -105,7 +105,8 @@ def _build_data_for_store(data: Dict[str, Any]) -> Dict[str, Any]:
     "parent_total_rows": data["parent"]["total_rows"],
     "child_file_name": data["child"]["file_name"],
     "child_num_rows": data["child"]["num_rows"],
-    "child_num_errors": data["child"]["num_errors"]
+    "child_num_errors": data["child"]["num_errors"],
+    "last_processed_timestamp": datetime.datetime.now(pytz.utc)
   }
 
 
