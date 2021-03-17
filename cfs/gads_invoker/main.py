@@ -18,10 +18,12 @@
 
 import csv
 import io
+import json
 import os
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, Sequence
 
+from absl import app
 from flask import Response
 from google.ads.google_ads.client import GoogleAdsClient
 from google.ads.google_ads.errors import GoogleAdsException
@@ -133,12 +135,11 @@ def _upload_conversions(config, project_id, reporting_topic, client,
     click_conversion.conversion_date_time = conversion_info[2]
     click_conversion.conversion_value = float(conversion_info[3])
     click_conversion.currency_code = conversion_info[4]
-
-    conversion_upload_service = client.get_service(
-        'ConversionUploadService', version='v6')
     conversions_list.append(click_conversion)
 
   try:
+    conversion_upload_service = client.get_service(
+        'ConversionUploadService', version='v6')
     # Upload the conversions using the API and handle any possible errors
     print('Proceeding to upload the conversions')
     conversion_upload_response = conversion_upload_service.upload_click_conversions(
@@ -265,3 +266,44 @@ def gads_invoker(request):
   else:
     print('ERROR: Configuration not found, please POST it in your request')
     return Response('', 400)
+
+
+def main(argv: Sequence[str]) -> None:
+  """Main function for testing using the command line.
+
+  Args:
+      argv (typing.Sequence): argument list
+  Returns:
+      None
+  """
+  # Replace with your testing JSON
+  request_string = '{"date": "20210316", "target_platform": "GAds", "parent": {"cid": "3134134123", "file_name": "EGO_313-4134-123_20210101_test.csv", "file_path": "input", "file_date": "20210101", "total_files": 13, "total_rows": 25000}, "child": {"file_name": "EGO_313-4134-123_20210101_test.csv---2", "total_rows": 2000}}'
+  request_json = json.loads(request_string)
+
+  if not all(elem in os.environ for elem in [
+      'DEFAULT_GCS_BUCKET', 'CLIENT_ID', 'DEVELOPER_TOKEN', 'CLIENT_SECRET',
+      'REFRESH_TOKEN', 'LOGIN_CUSTOMER_ID', 'DEFAULT_GCP_PROJECT',
+      'STORE_RESPONSE_STATS_TOPIC'
+  ]):
+    print('Cannot proceed, there are missing input values, '
+          'please make sure you set all the environment variables correctly.')
+    sys.exit(1)
+
+  bucket_name = os.environ['DEFAULT_GCS_BUCKET']
+  client_id = os.environ['CLIENT_ID']
+  developer_token = os.environ['DEVELOPER_TOKEN']
+  client_secret = os.environ['CLIENT_SECRET']
+  refresh_token = os.environ['REFRESH_TOKEN']
+  login_customer_id = os.environ['LOGIN_CUSTOMER_ID']
+  project_id = os.environ['DEFAULT_GCP_PROJECT']
+  reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
+
+  client = _initialize_gads_client(client_id, developer_token, client_secret,
+                                   refresh_token, login_customer_id,
+                                   request_json)
+  result = _gads_invoker_worker(client, bucket_name, request_json, project_id,
+                                reporting_topic)
+  print('Test execution returned: {}'.format(result))
+
+if __name__ == '__main__':
+  app.run(main)
