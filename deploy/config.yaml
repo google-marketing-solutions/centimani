@@ -18,7 +18,7 @@
 # General settings
 # =====================================================================
 DEPLOYMENT_NAME: 'ego_cogito'
-SOLUTION_PREFIX: 'massive_uploader'
+SOLUTION_PREFIX: 'jaime_massive_uploader'
 # Service account for the deployment. It must be granted in all the GCP projects used
 SERVICE_ACCOUNT: 'hectorparra-test@appspot.gserviceaccount.com'
 # Project for pub/sub & firestore
@@ -30,7 +30,7 @@ DEFAULT_GCP_REGION: 'europe-west1'
 # =====================================================================
 CF_NAME_SLICER: 'file_slicer'
 CF_NAME_GADS_INVOKER: 'gads_invoker'
-CF_NAME_GADS_RESPONSE_HANDLER: 'gads_response_handler'
+CF_NAME_STORE_RESPONSE_STATS: 'store_response_stats'
 CF_NAME_REPORTING_DATA_EXTRACTOR: 'reporting_data_extractor'
 
 # GCS settings

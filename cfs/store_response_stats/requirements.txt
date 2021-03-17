@@ -17,3 +17,4 @@ google.cloud.logging
 google-cloud-pubsub
 google-cloud-firestore
 google-cloud-datastore
+google-ads

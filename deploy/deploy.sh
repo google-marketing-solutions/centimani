@@ -40,7 +40,7 @@ function deploy_solution {
   echo "**************************************************************"
   echo "* Account Permissions Set.                                   *"
   echo "**************************************************************"
-  #deploy_cloud_functions
+  deploy_cloud_functions
   echo "**************************************************************"
   echo "* Cloud Functions Successfully Deployed.                     *"
   echo "**************************************************************"
@@ -48,7 +48,7 @@ function deploy_solution {
   echo "**************************************************************"
   echo "* Schedulers Successfully Deployed.                          *"
   echo "**************************************************************"
-  #create_bq_dataset
+  create_bq_dataset
   echo "**************************************************************"
   echo "**************************************************************"
   echo " IMPORTANT: run the post deployment tasks explained in the doc!"

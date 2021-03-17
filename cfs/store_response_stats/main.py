@@ -30,62 +30,12 @@ import uuid
 from typing import Any, Dict, Optional
 from google.cloud.functions_v1.context import Context
 from google.cloud import pubsub_v1 as pubsub
-# from google.cloud import firestore_v1 as firestore
 from google.cloud import datastore as store
-
 import pytz
 
 DEFAULT_GCP_PROJECT = os.getenv("DEFAULT_GCP_PROJECT", "")
 MAX_RETRIES = 3
 SLEEP_IN_SECONDS = 5
-
-
-def _is_partial_failure_error_present(response):
-  """Checks whether a response message has a partial failure error.
-
-    In Python the partial_failure_error attr is always present on a response
-    message and is represented by a google.rpc.Status message. So we can't
-    simply check whether the field is present, we must check that the code is
-    non-zero. Error codes are represented by the google.rpc.Code proto Enum:
-    https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
-
-    Args:
-        response:  A MutateAdGroupsResponse message instance.
-    Returns: A boolean, whether or not the response message has a partial
-      failure error.
-  """
-  partial_failure = getattr(response, "partial_failure_error", None)
-  code = getattr(partial_failure, "code", None)
-
-  return code != 0
-
-
-def _process_data(data: Dict[str, Any]) -> Dict[str, Any]:
-  """Create and initialises the file firestore structure
-
-  Args:
-    data: a dictionary containing the information to store in Firestore
-
-  Returns:
-    A dictionary containing the input data + the error data
-  """
-  
-  response = data["conversions_api_response"]
-  if _is_partial_failure_error_present(response):
-    print("Partial failures occurred. Details will be shown below.\n")
-
-    partial_failure = getattr(response, "partial_failure_error", None)
-    error_details = getattr(partial_failure, "details", [])
-
-    for error_detail in error_details:
-      failure_message = client.get_type("GoogleAdsFailure", version="v6")
-      failure_object = failure_message.FromString(error_detail.value)
-    data["child"]["num_errors"] = len(error_details)
-  else:
-    data["child"]["num_errors"] = 0
-
-  return data
-
 
 def _upsert_processing_date_in_datastore(db: store.client.Client,
                                          data: Dict[str, Any]) -> store.key.Key:
@@ -142,11 +92,12 @@ def _insert_data_in_datastore(db: store.Client, data: Dict[str, Any]):
       print(e)
       time.sleep(SLEEP_IN_SECONDS)
 
-def _build_data_for_firestore(data: Dict[str, Any]) -> Dict[str, Any]:
+def _build_data_for_store(data: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
     "cid": data["parent"]["cid"],
     "processing_date": data["date"],
+    "target_platform": data["target_platform"],
     "parent_file_name": data["parent"]["file_name"],
     "parent_file_path": data["parent"]["file_path"],
     "parent_file_date": data["parent"]["file_date"],
@@ -173,19 +124,16 @@ def main(event: Dict[str, Any], context=Optional[Context]):
 
   data = base64.b64decode(event["data"])
   input_data = json.loads(data)
-
   db = store.Client(DEFAULT_GCP_PROJECT)
-
-  input_data = _process_data(input_data)
   _insert_data_in_datastore(db, 
-    _build_data_for_firestore(input_data)
+    _build_data_for_store(input_data)
   )
-  
 
 
 def _test_main():
   data = {
       "date": "20210316",
+      "target_platform": "GAds",
       "parent": {
           "cid": "1234",
           "file_name": "parent_file_1",
@@ -196,7 +144,8 @@ def _test_main():
       },
       "child": {
           "file_name": "child_file_1",
-          "num_rows": 20
+          "num_rows": 20,
+          "num_errors": 10
       },
       "conversions_api_response": {}
   }

@@ -81,6 +81,7 @@ def _get_bq_schema():
   return [
          bigquery.SchemaField("cid","STRING",mode="REQUIRED")
         ,bigquery.SchemaField("processing_date","STRING",mode="REQUIRED")
+        ,bigquery.SchemaField("target_platform","STRING",mode="REQUIRED")
         ,bigquery.SchemaField("parent_file_name","STRING",mode="REQUIRED")
         ,bigquery.SchemaField("parent_file_path","STRING",mode="REQUIRED")
         ,bigquery.SchemaField("parent_file_date","STRING",mode="REQUIRED")
