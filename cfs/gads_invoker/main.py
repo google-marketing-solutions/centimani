@@ -19,77 +19,85 @@
 import csv
 import io
 import os
-import random
-import string
 import sys
-from typing import Sequence
+from typing import Any, Dict
 
-from absl import app
+from flask import Response
 from google.ads.google_ads.client import GoogleAdsClient
 from google.ads.google_ads.errors import GoogleAdsException
+# from google.ads.google_ads.services import UploadClickConversionsResponse
+from google.cloud import pubsub_v1
 from google.cloud import storage
 
-def _is_partial_failure_error_present(conversion_upload_response: UploadClickConversionsResponse) -> bool:
+
+def _is_partial_failure_error_present(conversion_upload_response) -> bool:
   """Checks whether a response message has a partial failure error.
 
-    In Python the partial_failure_error attr is always present on a response
-    message and is represented by a google.rpc.Status message. So we can't
-    simply check whether the field is present, we must check that the code is
-    non-zero. Error codes are represented by the google.rpc.Code proto Enum:
-    https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
-
-    Args:
-        response:  A MutateAdGroupsResponse message instance.
-    Returns: A boolean, whether or not the response message has a partial
+  Args:
+      conversion_upload_response:  A conversion_upload_response instance.
+  Returns:
+      A boolean, whether or not the response message has a partial
       failure error.
   """
-  partial_failure = getattr(conversion_upload_response, "partial_failure_error", None)
-  code = getattr(partial_failure, "code", None)
+  partial_failure = getattr(conversion_upload_response, 'partial_failure_error',
+                            None)
+  code = getattr(partial_failure, 'code', None)
 
   return code != 0
 
-def _count_partial_errors(client: GoogleAdsClient, conversion_upload_response) -> int:
+
+def _count_partial_errors(client: GoogleAdsClient,
+                          conversion_upload_response) -> int:
   """Counts the partial errors in the GAds response.
 
-    Args:
-        client: A GoogleAdsClient instance
-        conversion_upload_response:  The response from Google Upload Conversion service.
-    Returns: An integer representing the total number of partial errors in the response
+  Args:
+      client: A GoogleAdsClient instance
+      conversion_upload_response: Google Upload Conversion service response.
+
+  Returns:
+      An integer representing the total number of partial errors in the response
       failure error.
   """
   error_count = 0
-  
+
   if _is_partial_failure_error_present(conversion_upload_response):
-    partial_failure = getattr(conversion_upload_response, "partial_failure_error", None)
-    error_details = getattr(partial_failure, "details", [])
+    partial_failure = getattr(conversion_upload_response,
+                              'partial_failure_error', None)
+    error_details = getattr(partial_failure, 'details', [])
 
     for error_detail in error_details:
-      failure_message = client.get_type("GoogleAdsFailure", version="v6")
+      failure_message = client.get_type('GoogleAdsFailure', version='v6')
       failure_object = failure_message.FromString(error_detail.value)
       error_count += len(failure_object.errors)
 
   return error_count
-  
 
-def _add_errors_to_input_data(data: Dict[str, Any]) -> Dict[str, Any]:
-  """Includes the error count to the input data
+
+def _add_errors_to_input_data(client: GoogleAdsClient,
+                              conversion_upload_response,
+                              data: Dict[str, Any]) -> Dict[str, Any]:
+  """Includes the error count to the input data.
 
   Args:
+    client: A GoogleAdsClient instance
+    conversion_upload_response: Response from the conversions upload API call
     data: the input data received in the trigger invocation
 
   Returns:
     The input data enriched with the num errors
   """
-  data["child"]["num_errors"] = _count_partial_errors(client, conversion_upload_response)
+  data['child']['num_errors'] = _count_partial_errors(
+      client, conversion_upload_response)
   return data
 
-  
+
 def _read_csv_from_blob(bucket_name, blob_name):
   """Function to read a blob containing a CSV file and return it as an array.
 
   Args:
     bucket_name (string): name of the source bucket
     blob_name (string): name of the file to move
+
   Returns:
     Decoded blob with the contents of the file
   """
@@ -102,33 +110,18 @@ def _read_csv_from_blob(bucket_name, blob_name):
   return decoded_blob
 
 
-def _gads_invoker_worker(client, bucket_name, config):
+def _upload_conversions(config, project_id, reporting_topic, client,
+                        customer_id, conversions):
   """Loads a chunk of conversions from GCS and sends it to the Google Ads API.
 
   Args:
-    client: Initialized instance of a Google Ads API client
-    bucket_name (string): Name of the bucket to read the chunk from
-    config (string): Configuration information.
-  Returns:
-    None
-  """
-  datestamp = config['date']
-  customer_id = config['parent']['cid']
-  chunk_filename = config['child']['file_name']
-  # Load filename from GCS
-  # Load chunk file
-  conversions_blob = _read_csv_from_blob(bucket_name, datestamp + '/slices_processing/' + chunk_filename)
-  conversions_list = csv.reader(io.StringIO(conversions_blob))
-  _upload_conversions(client, customer_id, conversions_list)
-
-
-def _upload_conversions(client, customer_id, conversions):
-  """Loads a chunk of conversions from GCS and sends it to the Google Ads API.
-
-  Args:
+    config: Configuration information
+    project_id (string): ID of the Google Cloud Project
+    reporting_topic (string): Pub/Sub topic for reporting messages
     client: Initialized instance of a Google Ads API client
     customer_id (string): CID of parent account to associate the upload with.
     conversions (list): Chunk of conversions containing details about each one.
+
   Returns:
     None
   """
@@ -142,8 +135,7 @@ def _upload_conversions(client, customer_id, conversions):
     click_conversion.currency_code = conversion_info[4]
 
     conversion_upload_service = client.get_service(
-        'ConversionUploadService', version='v6'
-    )
+        'ConversionUploadService', version='v6')
     conversions_list.append(click_conversion)
 
   try:
@@ -151,18 +143,60 @@ def _upload_conversions(client, customer_id, conversions):
     print('Proceeding to upload the conversions')
     conversion_upload_response = conversion_upload_service.upload_click_conversions(
         customer_id, conversions_list, partial_failure=True)
-    # print('API response: {}'.format(conversion_upload_response))
+    print('Conversions upload process successfully completed')
+    pubsub_payload = _add_errors_to_input_data(client,
+                                               conversion_upload_response,
+                                               config)
+    publisher = pubsub_v1.PublisherClient()
+    topic_path_reporting = publisher.topic_path(project_id, reporting_topic)
+    publisher.publish(topic_path_reporting, data=bytes(pubsub_payload, 'utf-8'))
+    print('Pub/Sub message sent')
   except GoogleAdsException as ex:
-    print(
-        f'Request with ID "{ex.request_id}" failed with status '
-        f'"{ex.error.code().name}" and includes the following errors:'
-    )
+    print(f'Request with ID "{ex.request_id}" failed with status '
+          f'"{ex.error.code().name}" and includes the following errors:')
     for error in ex.failure.errors:
       print(f'\tError with message "{error.message}".')
       if error.location:
         for field_path_element in error.location.field_path_elements:
           print(f'\t\tOn field: {field_path_element.field_name}')
-    sys.exit(1)
+    return 200
+  except:
+    print('Unexpected error:', sys.exc_info()[0])
+    pubsub_payload = _add_errors_to_input_data(client,
+                                               conversion_upload_response,
+                                               config)
+    publisher = pubsub_v1.PublisherClient()
+    topic_path_reporting = publisher.topic_path(project_id, reporting_topic)
+    publisher.publish(topic_path_reporting, data=bytes(pubsub_payload, 'utf-8'))
+    print('Pub/Sub message sent')
+    return 500
+
+
+def _gads_invoker_worker(client, bucket_name, config, project_id,
+                         reporting_topic):
+  """Loads a chunk of conversions from GCS and sends it to the Google Ads API.
+
+  Args:
+    client: Initialized instance of a Google Ads API client
+    bucket_name (string): Name of the bucket to read the chunk from
+    config (string): Configuration information.
+    project_id (string): ID of the Google Cloud Project
+    reporting_topic (string): Pub/Sub topic for reporting messages
+
+  Returns:
+    None
+  """
+  datestamp = config['date']
+  customer_id = config['parent']['cid']
+  chunk_filename = config['child']['file_name']
+  # Load filename from GCS
+  # Load chunk file
+  conversions_blob = _read_csv_from_blob(
+      bucket_name, datestamp + '/slices_processing/' + chunk_filename)
+  conversions_list = csv.reader(io.StringIO(conversions_blob))
+  result = _upload_conversions(config, project_id, reporting_topic, client,
+                               customer_id, conversions_list)
+  return result
 
 
 def _initialize_gads_client(client_id, developer_token, client_secret,
@@ -176,15 +210,16 @@ def _initialize_gads_client(client_id, developer_token, client_secret,
     refresh_token(string): Refresh Token used by the API client
     login_customer_id(string): Customer ID used for login
     config(string): Configuration settings passed to the Cloud Function
+
   Returns:
     None
   """
-  credentials =  {
-    'developer_token': developer_token,
-    'client_id': client_id,
-    'client_secret': client_secret,
-    'refresh_token': refresh_token,
-    'login_customer_id': '8767308703'
+  credentials = {
+      'developer_token': developer_token,
+      'client_id': client_id,
+      'client_secret': client_secret,
+      'refresh_token': refresh_token,
+      'login_customer_id': login_customer_id
   }
   client = GoogleAdsClient.load_from_dict(credentials)
   return client
@@ -195,14 +230,17 @@ def gads_invoker(request):
 
   Args:
     request (flask.Request): HTTP request object.
+
   Returns:
         The response text or any set of values that can be turned into a
         Response object using
-        `make_response <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
+        `make_response
+        <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
   """
   if not all(elem in os.environ for elem in [
       'DEFAULT_GCS_BUCKET', 'CLIENT_ID', 'DEVELOPER_TOKEN', 'CLIENT_SECRET',
-      'REFRESH_TOKEN', 'LOGIN_CUSTOMER_ID'
+      'REFRESH_TOKEN', 'LOGIN_CUSTOMER_ID', 'DEFAULT_GCP_PROJECT',
+      'STORE_RESPONSE_STATS_TOPIC'
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
@@ -213,13 +251,17 @@ def gads_invoker(request):
   developer_token = os.environ['DEVELOPER_TOKEN']
   client_secret = os.environ['CLIENT_SECRET']
   refresh_token = os.environ['REFRESH_TOKEN']
-  login_customer_id  = os.environ['LOGIN_CUSTOMER_ID']
+  login_customer_id = os.environ['LOGIN_CUSTOMER_ID']
+  project_id = os.environ['DEFAULT_GCP_PROJECT']
+  reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
   request_json = request.get_json(silent=True)
   if request_json and 'parent' in request_json and 'child' in request_json:
     client = _initialize_gads_client(client_id, developer_token, client_secret,
                                      refresh_token, login_customer_id,
                                      request_json)
-    _gads_invoker_worker(client, bucket_name, request_json)
+    result = _gads_invoker_worker(client, bucket_name, request_json, project_id,
+                                  reporting_topic)
+    return Response('', result)
   else:
     print('ERROR: Configuration not found, please POST it in your request')
-
+    return Response('', 400)
