@@ -118,6 +118,7 @@ def _create_new_task(project, location, queue_name, parent_cid, parent_filename,
 
   payload_json = {
       'date': processing_date,
+      'target_platform': 'GAds',
       'parent': {
           'cid': parent_cid.replace('-', ''),
           'file_name': parent_filename,
