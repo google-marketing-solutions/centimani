@@ -29,7 +29,61 @@ from google.ads.google_ads.client import GoogleAdsClient
 from google.ads.google_ads.errors import GoogleAdsException
 from google.cloud import storage
 
+def _is_partial_failure_error_present(conversion_upload_response: UploadClickConversionsResponse) -> bool:
+  """Checks whether a response message has a partial failure error.
 
+    In Python the partial_failure_error attr is always present on a response
+    message and is represented by a google.rpc.Status message. So we can't
+    simply check whether the field is present, we must check that the code is
+    non-zero. Error codes are represented by the google.rpc.Code proto Enum:
+    https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
+
+    Args:
+        response:  A MutateAdGroupsResponse message instance.
+    Returns: A boolean, whether or not the response message has a partial
+      failure error.
+  """
+  partial_failure = getattr(conversion_upload_response, "partial_failure_error", None)
+  code = getattr(partial_failure, "code", None)
+
+  return code != 0
+
+def _count_partial_errors(client: GoogleAdsClient, conversion_upload_response) -> int:
+  """Counts the partial errors in the GAds response.
+
+    Args:
+        client: A GoogleAdsClient instance
+        conversion_upload_response:  The response from Google Upload Conversion service.
+    Returns: An integer representing the total number of partial errors in the response
+      failure error.
+  """
+  error_count = 0
+  
+  if _is_partial_failure_error_present(conversion_upload_response):
+    partial_failure = getattr(conversion_upload_response, "partial_failure_error", None)
+    error_details = getattr(partial_failure, "details", [])
+
+    for error_detail in error_details:
+      failure_message = client.get_type("GoogleAdsFailure", version="v6")
+      failure_object = failure_message.FromString(error_detail.value)
+      error_count += len(failure_object.errors)
+
+  return error_count
+  
+
+def _add_errors_to_input_data(data: Dict[str, Any]) -> Dict[str, Any]:
+  """Includes the error count to the input data
+
+  Args:
+    data: the input data received in the trigger invocation
+
+  Returns:
+    The input data enriched with the num errors
+  """
+  data["child"]["num_errors"] = _count_partial_errors(client, conversion_upload_response)
+  return data
+
+  
 def _read_csv_from_blob(bucket_name, blob_name):
   """Function to read a blob containing a CSV file and return it as an array.
 
@@ -153,6 +207,7 @@ def gads_invoker(request):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
+
   bucket_name = os.environ['DEFAULT_GCS_BUCKET']
   client_id = os.environ['CLIENT_ID']
   developer_token = os.environ['DEVELOPER_TOKEN']
