@@ -37,7 +37,7 @@ CFG_FILE=$(cat $CONFIG_PATH $CUSTOM_CONFIG_PATH > ./__config.yaml)
 
 gcloud functions deploy "$DEPLOYMENT_NAME""_""$SOLUTION_PREFIX""_""$CF_NAME""" \
    --runtime python37 \
-   --entry-point main \
+   --entry-point gads_invoker \
    --trigger-http \
    --memory "$MEMORY" \
    --timeout "$TIMEOUT" \

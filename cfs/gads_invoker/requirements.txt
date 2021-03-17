@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-functions-framework
-google.cloud.logging
-google-cloud-pubsub
-google-cloud-firestore
-google-cloud-datastore
+absl-py
+google-ads
+google-cloud-storage

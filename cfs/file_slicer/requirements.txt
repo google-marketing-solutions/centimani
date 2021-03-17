@@ -1,2 +1,3 @@
 absl-py
 google-cloud-storage
+google-cloud-tasks

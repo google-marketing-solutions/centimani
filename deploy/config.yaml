@@ -33,6 +33,10 @@ CF_NAME_GADS_INVOKER: 'gads_invoker'
 CF_NAME_STORE_RESPONSE_STATS: 'store_response_stats'
 CF_NAME_REPORTING_DATA_EXTRACTOR: 'reporting_data_extractor'
 
+# Cloud Tasks settings
+# =====================================================================
+CT_QUEUE_NAME: 'conversions-upload'
+
 # GCS settings
 # =====================================================================
 DEFAULT_GCS_BUCKET: 'test_conversions_import'
@@ -57,7 +61,13 @@ REPORTING_DATA_POLLING_CONFIG: '\*/5 \* \* \* \*'
 GADS_RESPONSE_HANDLER_TOPIC: 'gads_response'
 REPORTING_DATA_EXTRACTOR_TOPIC: 'extract_report_data'
 
-# Firestore 
+# Firestore
 # =====================================================================
 
+# Google Ads client settings
+CLIENT_ID: ''
+DEVELOPER_TOKEN: 'x7K8pNGcFXWLa_XRvQdd-A'
+CLIENT_SECRET: 'JNCiFzxiOwdt6oLAmoij1ILX'
+REFRESH_TOKEN: ''
+LOGIN_CUSTOMER_ID: '8767308703'
 
