@@ -129,7 +129,7 @@ def _create_new_task(project, location, queue_name, parent_cid, parent_filename,
       },
       'child': {
           'file_name': os.path.basename(child_filename),
-          'total_rows': child_numrows
+          'num_rows': child_numrows
       }
   }
 
