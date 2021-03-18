@@ -27,12 +27,13 @@ import os
 import random
 import string
 import sys
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Sequence, Optional
 
 from absl import app
 from google.cloud import storage
 from google.cloud import tasks_v2
 from google.api_core.exceptions import NotFound
+from google.cloud.functions_v1.context import Context
 from google.protobuf import duration_pb2
 
 
@@ -181,7 +182,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
   task['http_request']['body'] = converted_payload
 
   # Use the client to build and send the task.
-  response = client.create_task(request={'parent': queue_path, 'task': task})
+  response = client.create_task(request={'parent': queue.name, 'task': task})
   print('Created task {}'.format(response.name))
 
 
@@ -252,11 +253,12 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
   print(f'File moved from {blob_name} to {new_blob_name}')
 
 
-def _file_slicer_worker(file_name, bucket_name, max_chunk_lines, project,
+def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project,
                         location, queue_config, invoker_url):
   """Splits a file into smaller chunks with a specific number of lines.
 
   Args:
+      client (tasks_v2.CloudTasksClient): the Cloud Tasks client
       file_name (string): Name of the file to be splitted in chunks.
       bucket_name (string): Name of Cloud Storage Bucket containing the file.
       max_chunk_lines (integer): Max number of lines to write into each chunk.
@@ -269,10 +271,7 @@ def _file_slicer_worker(file_name, bucket_name, max_chunk_lines, project,
       None
   """
 
-  # Create a client.
-  client = tasks_v2.CloudTasksClient()
   # Init Cloud Task Queue
-  queue_path = client.queue_path(project, location, queue_name)
   queue = _upsert_queue(client, queue_config)
 
   # Move file to processing folder
@@ -338,7 +337,7 @@ def _file_slicer_worker(file_name, bucket_name, max_chunk_lines, project,
         (format(num_chunks), format(parent_filename)))
 
 
-def file_slicer(data, context):
+def file_slicer(data, context=Optional[Context]):
   """Background Cloud Function to be triggered by Cloud Storage.
 
      This function will split a big CSV file into smaller CSVs each of them
@@ -356,12 +355,14 @@ def file_slicer(data, context):
   bucket = data['bucket']
   if not all(elem in os.environ for elem in [
       'MAX_CHUNK_LINES', 'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
-      'CT_QUEUE_NAME', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'CF_NAME_INVOKER'
+      'CT_QUEUE_NAME', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'CF_NAME_GADS_INVOKER'
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
   if filename.endswith('.csv') and filename.startswith('input/'):
+    # Create a client.
+    client = tasks_v2.CloudTasksClient()
     print('Processing file %s' % filename)
     max_chunk_lines = int(os.environ['MAX_CHUNK_LINES'])
     project = os.environ['DEFAULT_GCP_PROJECT']
@@ -369,7 +370,7 @@ def file_slicer(data, context):
     queue_name = os.environ['CT_QUEUE_NAME']
     deployment_name = os.environ['DEPLOYMENT_NAME']
     solution_prefix = os.environ['SOLUTION_PREFIX']
-    cf_name_invoker = os.environ['CF_NAME_INVOKER']
+    cf_name_invoker = os.environ['CF_NAME_GADS_INVOKER']
     invoker_url = f'https://{location}-{project}.cloudfunctions.net/{deployment_name}_{solution_prefix}_{cf_name_invoker}'
     max_dispatches_per_second = int(
         os.environ['CT_QUEUE_MAX_DISPATCHES_PER_SECOND'])
@@ -381,12 +382,12 @@ def file_slicer(data, context):
     max_backoff_seconds = int(os.environ['CT_QUEUE_MAX_BACKOFF_SECONDS'])
     max_doublings = int(os.environ['CT_QUEUE_MAX_DOUBLINGS'])
 
-    queue_config = _get_queue_config(project, location, queue_name,
+    queue_config = _get_queue_config(client, project, location, queue_name,
                                      max_dispatches_per_second,
                                      max_concurrent_dispatches, max_attempts,
                                      max_retry_seconds, min_backoff_seconds,
                                      max_backoff_seconds, max_doublings)
-    _file_slicer_worker(filename, bucket, max_chunk_lines, project, location,
+    _file_slicer_worker(client, filename, bucket, max_chunk_lines, project, location,
                         queue_config, invoker_url)
   else:
     print('Bypassing file %s' % filename)
@@ -401,15 +402,20 @@ def main(argv: Sequence[str]) -> None:
   Returns:
       None
   """
-  if len(argv) != 3:
-    raise app.UsageError('Please make sure you are passing all required params')
-  else:
+  data = {
+    "bucket": os.environ['DEFAULT_GCS_BUCKET'],
+    "name": argv[1]
+    }
+  file_slicer(data=data)
+  #if len(argv) != 3:
+  #  raise app.UsageError('Please make sure you are passing all required params')
+  #else:
     # Params expected are filename, bucket, max_chunk_lines, project, location,
     # queue_name and invoker CF full url
-    _file_slicer_worker(
-        argv[1], argv[2], argv[3], argv[4], argv[5],
-        _get_queue_config(
-            project=argv[4], location=argv[5], queue_name=argv[6]), argv[7])
+  #  _file_slicer_worker(
+  #      argv[1], argv[2], argv[3], argv[4], argv[5],
+  #      _get_queue_config(
+  #          project=argv[4], location=argv[5], queue_name=argv[6]), argv[7])
 
 
 if __name__ == '__main__':
