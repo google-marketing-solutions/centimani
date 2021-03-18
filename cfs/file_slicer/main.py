@@ -111,7 +111,7 @@ def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
 def _create_new_task(client, queue, project, location, queue_name, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
-                     processing_date, url, extra_parameters):
+                     processing_date, url, extra_parameters, service_account):
   """Creates a new task in Cloud Tasks to process a chunk of conversions.
 
   Args:
@@ -131,6 +131,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
     processing_date (string): date when the file is being processed
     url (string): url of the cloud function to be triggered by the task.
     extra_parameters: string array representing the extra parameters for the platform
+    service_account: string representing the service account to use for auth
 
   Returns:
       None
@@ -141,6 +142,9 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
       'http_request': {  # Specify the type of request.
           'http_method': tasks_v2.HttpMethod.POST,
           'url': url,  # The full url path that the task will be sent to.
+          'oidc_token': {
+            'service_account_email': service_account,
+          },
       }
   }
 
@@ -161,7 +165,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
           'num_rows': child_numrows
       }
   }
-  print(payload_json)
+  # print(payload_json)
   # Add the payload
   payload = json.dumps(payload_json)
 
@@ -247,7 +251,7 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
 
 
 def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project,
-                        location, queue_config, invoker_url):
+                        location, queue_config, invoker_url, service_account):
   """Splits a file into smaller chunks with a specific number of lines.
 
   Args:
@@ -259,6 +263,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
       location (string): location of the GCP project
       queue_config (Dict[str, Any]): name of the Cloud Tasks queue to use
       invoker_url (string): full url to the gAds Invoker Cloud Function
+      service_account (string): represents the SA for authentication
 
   Returns:
       None
@@ -343,7 +348,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
                        parent_cid, parent_filename, parent_filepath,
                        parent_numchunks, parent_numrows, child_filename,
                        child_numrows, parent_date, processing_date, invoker_url,
-                       extra_params)
+                       extra_params, service_account)
       chunk_lines = 0
       chunk_buffer = []
 
@@ -357,7 +362,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
                      processing_date, invoker_url,
-                     extra_params)
+                     extra_params, service_account)
 
   print('Wrote %s chunks for %s' %
         (format(num_chunks), format(parent_filename)))
@@ -381,7 +386,8 @@ def file_slicer(data, context=Optional[Context]):
   bucket = data['bucket']
   if not all(elem in os.environ for elem in [
       'MAX_CHUNK_LINES', 'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
-      'CT_QUEUE_NAME', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'CF_NAME_GADS_INVOKER'
+      'CT_QUEUE_NAME', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'CF_NAME_GADS_INVOKER',
+      'SERVICE_ACCOUNT'
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
@@ -398,6 +404,7 @@ def file_slicer(data, context=Optional[Context]):
     solution_prefix = os.environ['SOLUTION_PREFIX']
     cf_name_invoker = os.environ['CF_NAME_GADS_INVOKER']
     invoker_url = f'https://{location}-{project}.cloudfunctions.net/{deployment_name}_{solution_prefix}_{cf_name_invoker}'
+    service_account = os.environ['SERVICE_ACCOUNT']
     max_dispatches_per_second = int(
         os.environ['CT_QUEUE_MAX_DISPATCHES_PER_SECOND'])
     max_concurrent_dispatches = int(
@@ -415,14 +422,16 @@ def file_slicer(data, context=Optional[Context]):
                                       max_retry_seconds, min_backoff_seconds,
                                       max_backoff_seconds, max_doublings)
       _file_slicer_worker(client, filename, bucket, max_chunk_lines, project, location,
-                          queue_config, invoker_url)
+                          queue_config, invoker_url, service_account)
     except Exception as e:
+      raise
       now = datetime.datetime.now()
       processing_date = now.strftime('%Y%m%d')
       filename = os.path.basename(filename)
       file_name = f'{processing_date}/processing/{filename}'
       new_file_name = f'{processing_date}/failed/{filename}'
       _mv_blob(bucket, file_name, bucket, new_file_name)
+      
 
   else:
     print('Bypassing file %s' % filename)
