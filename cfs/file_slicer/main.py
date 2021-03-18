@@ -27,7 +27,7 @@ import os
 import random
 import string
 import sys
-from typing import Sequence
+from typing import Any, Dict, Sequence
 
 from absl import app
 from google.cloud import storage
@@ -35,38 +35,52 @@ from google.cloud import tasks_v2
 from google.api_core.exceptions import NotFound
 from google.protobuf import duration_pb2
 
-def _create_new_task(project, location, queue_name, parent_cid, parent_filename,
-                     parent_filepath, parent_numchunks, parent_numrows,
-                     child_filename, child_numrows, parent_date,
-                     processing_date, url):
-  """Creates a new task in Cloud Tasks to process a chunk of conversions.
 
-  Args:
-    project (string): name of the GCP project.
-    location (string): location where Cloud Tasks is running.
-    queue_name (string): name of the Cloud Tasks queue to use
-    parent_cid (string): CID associated with the parent file.
-    parent_filename (string): file name of the parent file.
-    parent_filepath (string): file path for the parent file.
-    parent_numchunks (integer): number of child chunks created for the parent.
-    parent_numrows (integer): number of rows in the parent file.
-    child_filename (string): file name of the child file.
-    child_numrows (integer): number of rows in the child file.
-    parent_date (string): date when the file was created
-    processing_date (string): date when the file is being processed
-    url (string): url of the cloud function to be triggered by the task.
-  Returns:
-      None
-  """
-  # Create a client.
-  client = tasks_v2.CloudTasksClient()
+def _get_queue_config(client: tasks_v2.CloudTasksClient, project: str,
+                      location: str, queue_name: str,
+                      max_dispatches_per_second: int,
+                      max_concurrent_dispatches: int, max_attempts: int,
+                      max_retry_seconds: int, min_backoff_seconds: int,
+                      max_backoff_seconds: int,
+                      max_doublings: int) -> Dict[str, Any]:
 
-  # Construct the fully qualified queue name.
-  queue_path = client.queue_path(project, location, queue_name)
+  min_backoff = duration_pb2.Duration()
+  min_backoff.seconds = min_backoff_seconds
 
+  max_backoff = duration_pb2.Duration()
+  max_backoff.seconds = max_backoff_seconds
+
+  # With the former values for min and max_backoff, plus 3 max_doublings,
+  # retries happen after 10, 20, 40, 80, 160, 240, 300, 300, 300 and 300
+  # seconds, respectively
+
+  max_retry = duration_pb2.Duration()
+  # Max retry = 10 + 20 + 40 + 8 + 160 + 240 + 300 + 300 + 300 + 300
+  max_retry.seconds = max_retry_seconds
+
+  queue_config = {
+      'name': client.queue_path(project, location, queue_name),
+      'rate_limits': {
+          'max_dispatches_per_second': max_dispatches_per_second,
+          'max_concurrent_dispatches': max_concurrent_dispatches,
+      },
+      'retry_config': {
+          'max_attempts': max_attempts,
+          'max_retry_duration': max_retry,
+          'min_backoff': min_backoff,
+          'max_backoff': max_backoff,
+          'max_doublings': max_doublings,
+      }
+  }
+
+  return queue_config
+
+
+def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
+                                                                        Any]):
   # Check if the queue exists
   try:
-    queue = client.get_queue(name=queue_path)
+    queue = client.get_queue(name=queue_config['name'])
   except NotFound:
     queue = None
 
@@ -74,7 +88,7 @@ def _create_new_task(project, location, queue_name, parent_cid, parent_filename,
     print('Queue not found, creating it')
     # Otherwise create the queue
     # Construct the fully qualified location path.
-    q_parent = f'projects/{project}/locations/{location}'
+    q_parent = queue_config['name'].split("/")[:-1]
     # Construct the create queue request.
 
     min_backoff = duration_pb2.Duration()
@@ -90,23 +104,44 @@ def _create_new_task(project, location, queue_name, parent_cid, parent_filename,
     max_retry = duration_pb2.Duration()
     # Max retry = 10 + 20 + 40 + 8 + 160 + 240 + 300 + 300 + 300 + 300
     max_retry.seconds = 1750
+    queue = client.create_queue(request={
+        'parent': q_parent,
+        'queue': queue_config
+    })
 
-    queue = {
-        'name': client.queue_path(project, location, queue_name),
-        'rate_limits': {
-            'max_dispatches_per_second': 4,
-            'max_concurrent_dispatches': 4,
-        },
-        'retry_config': {
-            'max_attempts': 10,
-            'max_retry_duration': max_retry,
-            'min_backoff': min_backoff,
-            'max_backoff': max_backoff,
-            'max_doublings': 3,
+  else:
+    queue = client.update_queue(request={
+        'queue': queue_config
+    })
 
-        }
-    }
-    response = client.create_queue(request={'parent': q_parent, 'queue': queue})
+  return queue
+
+def _create_new_task(client, queue, project, location, queue_name, parent_cid,
+                     parent_filename, parent_filepath, parent_numchunks,
+                     parent_numrows, child_filename, child_numrows, parent_date,
+                     processing_date, url):
+  """Creates a new task in Cloud Tasks to process a chunk of conversions.
+
+  Args:
+    client: the cloud taks client
+    queue (Queue): cloud task queue to insert the task into
+    project (string): name of the GCP project.
+    location (string): location where Cloud Tasks is running.
+    queue_config (Dict[str, Any]): config for the cloud task
+    parent_cid (string): CID associated with the parent file.
+    parent_filename (string): file name of the parent file.
+    parent_filepath (string): file path for the parent file.
+    parent_numchunks (integer): number of child chunks created for the parent.
+    parent_numrows (integer): number of rows in the parent file.
+    child_filename (string): file name of the child file.
+    child_numrows (integer): number of rows in the child file.
+    parent_date (string): date when the file was created
+    processing_date (string): date when the file is being processed
+    url (string): url of the cloud function to be triggered by the task.
+
+  Returns:
+      None
+  """
 
   # Construct the request body.
   task = {
@@ -118,7 +153,7 @@ def _create_new_task(project, location, queue_name, parent_cid, parent_filename,
 
   payload_json = {
       'date': processing_date,
-      'target_platform': 'GAds',
+      'target_platform': 'gads',
       'parent': {
           'cid': parent_cid.replace('-', ''),
           'file_name': parent_filename,
@@ -157,12 +192,14 @@ def _write_chunk_to_blob(bucket_name, blob_name, data):
     bucket_name (string): name of the source bucket
     blob_name (string): name of the blob to create
     data (list): list of strings to be written to the blob
+
   Returns:
       None
   """
   client = storage.Client()
   # CSV is created in /tmp with a random name and then uploaded to GCS
-  random_filename = '/tmp/' + ''.join(random.choice(string.ascii_lowercase) for i in range(16)) + '.csv'
+  random_filename = '/tmp/' + ''.join(
+      random.choice(string.ascii_lowercase) for i in range(16)) + '.csv'
   with open(random_filename, 'w') as f:
     writer = csv.writer(f)
     writer.writerows(data)
@@ -178,6 +215,7 @@ def _read_csv_from_blob(bucket_name, blob_name):
   Args:
     bucket_name (string): name of the source bucket
     blob_name (string): name of the file to move
+
   Returns:
     Decoded blob with the contents of the file
   """
@@ -197,6 +235,7 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
     blob_name (string): name of the file to move
     new_bucket_name (string): name of target bucket (can be same as original)
     new_blob_name (string): name of file in target bucket
+
   Returns:
       None
   """
@@ -214,7 +253,7 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
 
 
 def _file_slicer_worker(file_name, bucket_name, max_chunk_lines, project,
-                        location, queue_name, invoker_url):
+                        location, queue_config, invoker_url):
   """Splits a file into smaller chunks with a specific number of lines.
 
   Args:
@@ -223,11 +262,19 @@ def _file_slicer_worker(file_name, bucket_name, max_chunk_lines, project,
       max_chunk_lines (integer): Max number of lines to write into each chunk.
       project (string): name of the GCP project
       location (string): location of the GCP project
-      queue_name (string): name of the Cloud Tasks queue to use
+      queue_config (Dict[str, Any]): name of the Cloud Tasks queue to use
       invoker_url (string): full url to the gAds Invoker Cloud Function
+
   Returns:
       None
   """
+
+  # Create a client.
+  client = tasks_v2.CloudTasksClient()
+  # Init Cloud Task Queue
+  queue_path = client.queue_path(project, location, queue_name)
+  queue = _upsert_queue(client, queue_config)
+
   # Move file to processing folder
   now = datetime.datetime.now()
   processing_date = now.strftime('%Y%m%d')
@@ -256,7 +303,7 @@ def _file_slicer_worker(file_name, bucket_name, max_chunk_lines, project,
   parent_numrows = sum(1 for row in conversions_blob)
   print('Parent_numrows is {}'.format(parent_numrows))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
-  parent_numchunks = math.ceil(parent_numrows/max_chunk_lines)
+  parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
 
   num_rows = 0
   num_chunks = 0
@@ -271,20 +318,21 @@ def _file_slicer_worker(file_name, bucket_name, max_chunk_lines, project,
       child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
       child_numrows = len(chunk_buffer)
       _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
-      _create_new_task(project, location, queue_name, parent_cid,
-                       parent_filename, parent_filepath, parent_numchunks,
-                       parent_numrows, child_filename, child_numrows,
-                       parent_date, processing_date, invoker_url)
+      _create_new_task(client, queue, project, location, queue_config,
+                       parent_cid, parent_filename, parent_filepath,
+                       parent_numchunks, parent_numrows, child_filename,
+                       child_numrows, parent_date, processing_date, invoker_url)
       chunk_buffer = []
+
   if chunk_buffer:
     num_chunks = num_chunks + 1
     child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
     child_numrows = len(chunk_buffer)
     _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
-    _create_new_task(project, location, queue_name, parent_cid,
+    _create_new_task(client, queue, project, location, queue_config, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
-                     parent_numrows, child_filename, child_numrows,
-                     parent_date, processing_date, invoker_url)
+                     parent_numrows, child_filename, child_numrows, parent_date,
+                     processing_date, invoker_url)
 
   print('Wrote %s chunks for %s' %
         (format(num_chunks), format(parent_filename)))
@@ -299,6 +347,7 @@ def file_slicer(data, context):
   Args:
       data (dict): The Cloud Functions event payload.
       context (google.cloud.functions.Context): The context of the request
+
   Returns:
       None
   """
@@ -322,8 +371,23 @@ def file_slicer(data, context):
     solution_prefix = os.environ['SOLUTION_PREFIX']
     cf_name_invoker = os.environ['CF_NAME_INVOKER']
     invoker_url = f'https://{location}-{project}.cloudfunctions.net/{deployment_name}_{solution_prefix}_{cf_name_invoker}'
+    max_dispatches_per_second = int(
+        os.environ['CT_QUEUE_MAX_DISPATCHES_PER_SECOND'])
+    max_concurrent_dispatches = int(
+        os.environ['CT_QUEUE_MAX_CONCURRENT_DISPATCHES'])
+    max_attempts = int(os.environ['CT_QUEUE_MAX_ATTEMPTS'])
+    max_retry_seconds = int(os.environ['CT_QUEUE_MAX_RETRY_SECONDS'])
+    min_backoff_seconds = int(os.environ['CT_QUEUE_MIN_BACKOFF_SECONDS'])
+    max_backoff_seconds = int(os.environ['CT_QUEUE_MAX_BACKOFF_SECONDS'])
+    max_doublings = int(os.environ['CT_QUEUE_MAX_DOUBLINGS'])
+
+    queue_config = _get_queue_config(project, location, queue_name,
+                                     max_dispatches_per_second,
+                                     max_concurrent_dispatches, max_attempts,
+                                     max_retry_seconds, min_backoff_seconds,
+                                     max_backoff_seconds, max_doublings)
     _file_slicer_worker(filename, bucket, max_chunk_lines, project, location,
-                        queue_name, invoker_url)
+                        queue_config, invoker_url)
   else:
     print('Bypassing file %s' % filename)
 
@@ -333,6 +397,7 @@ def main(argv: Sequence[str]) -> None:
 
   Args:
       argv (typing.Sequence): argument list
+
   Returns:
       None
   """
@@ -341,8 +406,10 @@ def main(argv: Sequence[str]) -> None:
   else:
     # Params expected are filename, bucket, max_chunk_lines, project, location,
     # queue_name and invoker CF full url
-    _file_slicer_worker(argv[1], argv[2], argv[3], argv[4], argv[5], argv[6],
-                        argv[7])
+    _file_slicer_worker(
+        argv[1], argv[2], argv[3], argv[4], argv[5],
+        _get_queue_config(
+            project=argv[4], location=argv[5], queue_name=argv[6]), argv[7])
 
 
 if __name__ == '__main__':

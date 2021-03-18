@@ -33,9 +33,17 @@ CF_NAME_GADS_INVOKER: 'gads_invoker'
 CF_NAME_STORE_RESPONSE_STATS: 'store_response_stats'
 CF_NAME_REPORTING_DATA_EXTRACTOR: 'reporting_data_extractor'
 
+
 # Cloud Tasks settings
 # =====================================================================
 CT_QUEUE_NAME: 'conversions-upload'
+CT_QUEUE_MAX_DISPATCHES_PER_SECOND: '4'
+CT_QUEUE_MAX_CONCURRENT_DISPATCHES: '4'
+CT_QUEUE_MAX_ATTEMPTS: '10'
+CT_QUEUE_MAX_RETRY_SECONDS: '1750'
+CT_QUEUE_MIN_BACKOFF_SECONDS: '10'
+CT_QUEUE_MAX_BACKOFF_SECONDS: '300'
+CT_QUEUE_MAX_DOUBLINGS: '3'
 
 # GCS settings
 # =====================================================================
@@ -69,4 +77,3 @@ DEVELOPER_TOKEN: ''
 CLIENT_SECRET: ''
 REFRESH_TOKEN: ''
 LOGIN_CUSTOMER_ID: ''
-
