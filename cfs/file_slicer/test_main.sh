@@ -23,4 +23,4 @@ source "$HELPERS_PATH"
 set -a
 eval "$(parse_yaml ""$CONFIG_PATH"")"
 
-python main.py "input/20210316_processing_EGO_313-4134-123_20210101_test.csv"
+python main.py "input/EGO_313-4134-123_20210318_prueba.csv"
