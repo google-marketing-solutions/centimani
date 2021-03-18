@@ -36,7 +36,12 @@ from google.api_core.exceptions import NotFound
 from google.cloud.functions_v1.context import Context
 from google.protobuf import duration_pb2
 
-
+def _get_file_parameters(csv_line: str) -> Dict[str, Any]:
+  if 'Parameters' in csv_line[0]:
+    return csv_line
+  else:
+    return []
+  
 def _get_queue_config(client: tasks_v2.CloudTasksClient, project: str,
                       location: str, queue_name: str,
                       max_dispatches_per_second: int,
@@ -120,7 +125,7 @@ def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
 def _create_new_task(client, queue, project, location, queue_name, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
-                     processing_date, url):
+                     processing_date, url, extra_parameters):
   """Creates a new task in Cloud Tasks to process a chunk of conversions.
 
   Args:
@@ -139,6 +144,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
     parent_date (string): date when the file was created
     processing_date (string): date when the file is being processed
     url (string): url of the cloud function to be triggered by the task.
+    extra_parameters: string array representing the extra parameters for the platform
 
   Returns:
       None
@@ -155,6 +161,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
   payload_json = {
       'date': processing_date,
       'target_platform': 'gads',
+      'extra_parameters': extra_parameters,
       'parent': {
           'cid': parent_cid.replace('-', ''),
           'file_name': parent_filename,
@@ -183,7 +190,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
 
   # Use the client to build and send the task.
   response = client.create_task(request={'parent': queue.name, 'task': task})
-  print('Created task {}'.format(response.name))
+  # print('Created task {}'.format(response.name))
 
 
 def _write_chunk_to_blob(bucket_name, blob_name, data):
@@ -207,7 +214,7 @@ def _write_chunk_to_blob(bucket_name, blob_name, data):
   bucket = client.get_bucket(bucket_name)
   blob = bucket.blob(blob_name)
   blob.upload_from_filename(random_filename)
-  print('Wrote chunk to file {}'.format(blob_name))
+  # print('Wrote chunk to file {}'.format(blob_name))
 
 
 def _read_csv_from_blob(bucket_name, blob_name):
@@ -296,32 +303,49 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
 
   # Load file in memory, read line by line and create chunks of a specific size
   conversions_blob = _read_csv_from_blob(bucket_name, new_file_name)
-  print('Conversions blob: {}'.format(conversions_blob))
+  # print('Conversions blob: {}'.format(conversions_blob))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
-  print('Conversions list: {}'.format(conversions_list))
+  # print('Conversions list: {}'.format(conversions_list))
   parent_numrows = sum(1 for row in conversions_blob)
-  print('Parent_numrows is {}'.format(parent_numrows))
+  # print('Parent_numrows is {}'.format(parent_numrows))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
   parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
 
   num_rows = 0
   num_chunks = 0
   chunk_buffer = []
+  extra_params = []
+  header = []
   print('Reading conversions')
   for conversion_info in conversions_list:
     num_rows = num_rows + 1
-    chunk_buffer.append(conversion_info)
+   
+    if num_rows == 1:
+      extra_params = _get_file_parameters(conversion_info)
+      if len(extra_params) == 0:
+        header = conversion_info   
+        chunk_buffer.append(header)
+    
+    if num_rows == 2 and len(extra_params) > 0:
+      header = conversion_info   
+      chunk_buffer.append(header)
+
+    if num_rows > 2:
+      chunk_buffer.append(conversion_info)
+
     if num_rows % max_chunk_lines == 0:
       num_chunks = num_chunks + 1
-      print('New chunk created, total number for now is {}'.format(num_chunks))
+      # print('New chunk created, total number for now is {}'.format(num_chunks))
       child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
       child_numrows = len(chunk_buffer)
       _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
       _create_new_task(client, queue, project, location, queue_config,
                        parent_cid, parent_filename, parent_filepath,
                        parent_numchunks, parent_numrows, child_filename,
-                       child_numrows, parent_date, processing_date, invoker_url)
+                       child_numrows, parent_date, processing_date, invoker_url,
+                       extra_params)
       chunk_buffer = []
+      chunk_buffer.append(header)
 
   if chunk_buffer:
     num_chunks = num_chunks + 1
@@ -331,7 +355,8 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
     _create_new_task(client, queue, project, location, queue_config, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
-                     processing_date, invoker_url)
+                     processing_date, invoker_url,
+                     extra_params)
 
   print('Wrote %s chunks for %s' %
         (format(num_chunks), format(parent_filename)))
@@ -382,13 +407,22 @@ def file_slicer(data, context=Optional[Context]):
     max_backoff_seconds = int(os.environ['CT_QUEUE_MAX_BACKOFF_SECONDS'])
     max_doublings = int(os.environ['CT_QUEUE_MAX_DOUBLINGS'])
 
-    queue_config = _get_queue_config(client, project, location, queue_name,
-                                     max_dispatches_per_second,
-                                     max_concurrent_dispatches, max_attempts,
-                                     max_retry_seconds, min_backoff_seconds,
-                                     max_backoff_seconds, max_doublings)
-    _file_slicer_worker(client, filename, bucket, max_chunk_lines, project, location,
-                        queue_config, invoker_url)
+    try:
+      queue_config = _get_queue_config(client, project, location, queue_name,
+                                      max_dispatches_per_second,
+                                      max_concurrent_dispatches, max_attempts,
+                                      max_retry_seconds, min_backoff_seconds,
+                                      max_backoff_seconds, max_doublings)
+      _file_slicer_worker(client, filename, bucket, max_chunk_lines, project, location,
+                          queue_config, invoker_url)
+    except Exception as e:
+      now = datetime.datetime.now()
+      processing_date = now.strftime('%Y%m%d')
+      filename = os.path.basename(filename)
+      file_name = f'{processing_date}/processing/{filename}'
+      new_file_name = f'{processing_date}/failed/{filename}'
+      _mv_blob(bucket, file_name, bucket, new_file_name)
+
   else:
     print('Bypassing file %s' % filename)
 
