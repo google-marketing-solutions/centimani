@@ -107,9 +107,8 @@ def main(event: Dict[str, Any], context=Optional[Context]):
       `timestamp` field contains the publish time.
   """
   del context
+  del event
 
-  data = base64.b64decode(event["data"])
-  input_data = json.loads(data)
   date = datetime.date.today().strftime("%Y%m%d")
   table_name = f"{DEFAULT_GCP_PROJECT}.{BQ_REPORTING_DATASET}.{BQ_REPORTING_TABLE}_{date}"
  
