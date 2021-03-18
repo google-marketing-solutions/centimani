@@ -95,21 +95,7 @@ def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
     # Otherwise create the queue
     # Construct the fully qualified location path.
     q_parent = queue_config['name'].split("/")[:-1]
-    # Construct the create queue request.
 
-    min_backoff = duration_pb2.Duration()
-    min_backoff.seconds = 10
-
-    max_backoff = duration_pb2.Duration()
-    max_backoff.seconds = 300
-
-    # With the former values for min and max_backoff, plus 3 max_doublings,
-    # retries happen after 10, 20, 40, 80, 160, 240, 300, 300, 300 and 300
-    # seconds, respectively
-
-    max_retry = duration_pb2.Duration()
-    # Max retry = 10 + 20 + 40 + 8 + 160 + 240 + 300 + 300 + 300 + 300
-    max_retry.seconds = 1750
     queue = client.create_queue(request={
         'parent': q_parent,
         'queue': queue_config
@@ -175,7 +161,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
           'num_rows': child_numrows
       }
   }
-
+  print(payload_json)
   # Add the payload
   payload = json.dumps(payload_json)
 
@@ -306,51 +292,66 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
   # print('Conversions blob: {}'.format(conversions_blob))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
   # print('Conversions list: {}'.format(conversions_list))
-  parent_numrows = sum(1 for row in conversions_blob)
-  # print('Parent_numrows is {}'.format(parent_numrows))
+  parent_numrows = sum(1 for row in conversions_list) -1
+  # print('Parent_numrows is {}'.format(parent_numrows))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
+  
   parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
+  # print('parent_numchunks is {}'.format(parent_numchunks))
 
   num_rows = 0
   num_chunks = 0
   chunk_buffer = []
   extra_params = []
   header = []
-  print('Reading conversions')
+  chunk_lines = 0
+   
   for conversion_info in conversions_list:
     num_rows = num_rows + 1
-   
-    if num_rows == 1:
-      extra_params = _get_file_parameters(conversion_info)
-      if len(extra_params) == 0:
-        header = conversion_info   
-        chunk_buffer.append(header)
-    
-    if num_rows == 2 and len(extra_params) > 0:
-      header = conversion_info   
-      chunk_buffer.append(header)
+       
 
     if num_rows > 2:
       chunk_buffer.append(conversion_info)
+      chunk_lines += 1
+    else:
+      if num_rows == 1:
+        extra_params = _get_file_parameters(conversion_info)  
+        # No parameters line, first row is the header
+        if len(extra_params) == 0:
+          header = conversion_info   
+        else:
+          parent_numrows = parent_numrows -1             
+      else:
+        if num_rows == 2:
+          # If parameters line, was present, second row is header
+          if len(extra_params) > 0:
+            header = conversion_info   
+          else: # else it's a conversion line
+            chunk_buffer.append(conversion_info)
+            chunk_lines += 1
 
-    if num_rows % max_chunk_lines == 0:
+
+    if (chunk_lines > 0) and (chunk_lines % max_chunk_lines == 0):
+      # print(f'{chunk_lines} % {max_chunk_lines}')
       num_chunks = num_chunks + 1
       # print('New chunk created, total number for now is {}'.format(num_chunks))
       child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
       child_numrows = len(chunk_buffer)
+      chunk_buffer.insert(0, header)
       _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
       _create_new_task(client, queue, project, location, queue_config,
                        parent_cid, parent_filename, parent_filepath,
                        parent_numchunks, parent_numrows, child_filename,
                        child_numrows, parent_date, processing_date, invoker_url,
                        extra_params)
+      chunk_lines = 0
       chunk_buffer = []
-      chunk_buffer.append(header)
 
   if chunk_buffer:
     num_chunks = num_chunks + 1
     child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
     child_numrows = len(chunk_buffer)
+    chunk_buffer.insert(0, header)
     _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
     _create_new_task(client, queue, project, location, queue_config, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
