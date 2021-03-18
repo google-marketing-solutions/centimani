@@ -29,9 +29,35 @@ from absl import app
 from flask import Response
 from google.ads.google_ads.client import GoogleAdsClient
 from google.ads.google_ads.errors import GoogleAdsException
-# from google.ads.google_ads.services import UploadClickConversionsResponse
 from google.cloud import pubsub_v1
 from google.cloud import storage
+
+
+def _get_conversion_action_resources(client: GoogleAdsClient,
+                                     customer_id: str) -> Dict[str, Any]:
+  """Retrieves the resources for all conversion actions "indexed" by name.
+
+  Args:
+      client: GADsClient
+      customer_id: the cid of the customer
+
+  Returns:
+      A boolean, whether or not the response message has a partial
+      failure error.
+  """
+  ga_service = client.get_service('GoogleAdsService', version='v6')
+  print('Extracting ad groups information from account %s', customer_id)
+  dict_result = {}
+  query = """
+      SELECT conversion_action.id, conversion_action.name FROM conversion_action
+      """
+  response = ga_service.search_stream(customer_id, query)
+  for batch in response:
+    for row in batch.results:
+      dict_result[
+          row.conversion_action.name] = row.conversion_action.resource_name
+
+  return dict_result
 
 
 def _is_partial_failure_error_present(conversion_upload_response) -> bool:
@@ -39,6 +65,7 @@ def _is_partial_failure_error_present(conversion_upload_response) -> bool:
 
   Args:
       conversion_upload_response:  A conversion_upload_response instance.
+
   Returns:
       A boolean, whether or not the response message has a partial
       failure error.
@@ -77,13 +104,11 @@ def _count_partial_errors(client: GoogleAdsClient,
   return error_count
 
 
-def _add_errors_to_input_data(client: GoogleAdsClient,
-                              data: Dict[str, Any],
+def _add_errors_to_input_data(data: Dict[str, Any],
                               num_errors: int) -> Dict[str, Any]:
   """Includes the error count to the input data.
 
   Args:
-    client: A GoogleAdsClient instance
     data: the input data received in the trigger invocation
     num_errors: the number of errors to add
 
@@ -128,75 +153,72 @@ def _upload_conversions(input_json, project_id, reporting_topic, client,
   Returns:
     None
   """
+
+  conversion_actions_resources = _get_conversion_action_resources(
+      client, input_json['parent']['cid'])
   # Create a list of click conversions to be uploaded
   conversions_list = []
   for conversion_info in conversions:
     click_conversion = client.get_type('ClickConversion', version='v6')
-    conversion_action_service = client.get_service(
-        "ConversionActionService", version="v6"
-    )
-    click_conversion.conversion_action = conversion_action_service.conversion_action_path(
-     customer_id, '340032850'
-    )
-
     click_conversion.gclid = conversion_info[0]
-    date_time_obj = datetime.datetime.strptime(conversion_info[2], '%Y-%m-%d %H:%M:%S')
+    click_conversion.conversion_action = conversion_actions_resources[
+        conversion_info[1]]
+    date_time_obj = datetime.datetime.strptime(conversion_info[2],
+                                               '%Y-%m-%d %H:%M:%S')
     timezone = pytz.timezone('Europe/Madrid')
     timezone_date_time_obj = timezone.localize(date_time_obj)
     adjusted_date_str = timezone_date_time_obj.strftime('%Y-%m-%d %H:%M:%S%z')
-    click_conversion.conversion_date_time = adjusted_date_str[:-2] + ':' + adjusted_date_str[-2:]
+    click_conversion.conversion_date_time = adjusted_date_str[:
+                                                              -2] + ':' + adjusted_date_str[
+                                                                  -2:]
     click_conversion.conversion_value = float(conversion_info[3])
     click_conversion.currency_code = conversion_info[4]
     conversions_list.append(click_conversion)
 
-  pubsub_payload = config
-                  
   try:
     conversion_upload_service = client.get_service(
         'ConversionUploadService', version='v6')
     # Upload the conversions using the API and handle any possible errors
-    print('Proceeding to upload conversions for customer_id {}'.format(customer_id))
+    print(f'Proceeding to upload conversions for customer_id {customer_id}')
     conversion_upload_response = conversion_upload_service.upload_click_conversions(
         customer_id, conversions_list, partial_failure=True)
-    print(conversion_upload_response)
-    pubsub_payload = _add_errors_to_input_data(client,
-                                               input_json,
-                        _count_partial_errors(client, conversion_upload_response)
-                        )
-    publisher = pubsub_v1.PublisherClient()
-    topic_path_reporting = publisher.topic_path(project_id, reporting_topic)
-    publisher.publish(topic_path_reporting, data=bytes(json.dumps(pubsub_payload), 'utf-8')).result()
-    print('Pub/Sub message sent')
+    pubsub_payload = _add_errors_to_input_data(
+        input_json,
+        _count_partial_errors(client, conversion_upload_response)
+        )
+    _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
+ 
     return 200
   except GoogleAdsException as ex:
-    print(f'Request with ID "{ex.request_id}" failed with status '
+    _print_errors(ex)      
+    pubsub_payload = _add_errors_to_input_data(input_json,
+                                               input_json['child']['num_rows'])
+    _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
+    return 500
+  except:
+    print('Unexpected error:', sys.exc_info()[0])
+    pubsub_payload = _add_errors_to_input_data(input_json,
+                                               input_json['child']['num_rows'])
+                                               
+    _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
+    return 500
+
+def _print_errors(ex):
+  print(f'Request with ID "{ex.request_id}" failed with status '
           f'"{ex.error.code().name}" and includes the following errors:')
-    for error in ex.failure.errors:
+  for error in ex.failure.errors:
       print(f'\tError with message "{error.message}".')
       if error.location:
         for field_path_element in error.location.field_path_elements:
           print(f'\t\tOn field: {field_path_element.field_name}')
-    pubsub_payload = _add_errors_to_input_data(
-                        client,
-                        input_json,
-                        input_json['child']['num_rows'])
-    publisher = pubsub_v1.PublisherClient()
-    topic_path_reporting = publisher.topic_path(project_id, reporting_topic)
-    publisher.publish(topic_path_reporting, data=bytes(json.dumps(pubsub_payload), 'utf-8')).result()
-    print('Pub/Sub message sent')
-    return 200
-  except:
-    print('Unexpected error:', sys.exc_info()[0])
-    pubsub_payload = _add_errors_to_input_data(
-                        client,
-                        input_json,
-                        input_json['child']['num_rows'])
-    publisher = pubsub_v1.PublisherClient()
-    topic_path_reporting = publisher.topic_path(project_id, reporting_topic)
-    publisher.publish(topic_path_reporting, data=bytes(json.dumps(pubsub_payload), 'utf-8')).result()
-    print('Pub/Sub message sent')
-    return 200
 
+def _send_pubsub_message(project_id, reporting_topic, pubsub_payload):
+  publisher = pubsub_v1.PublisherClient()
+  topic_path_reporting = publisher.topic_path(project_id, reporting_topic)
+  publisher.publish(
+        topic_path_reporting, data=bytes(json.dumps(pubsub_payload),
+                                         'utf-8')).result()
+  
 
 def _gads_invoker_worker(client, bucket_name, input_json, project_id,
                          reporting_topic):
@@ -226,7 +248,7 @@ def _gads_invoker_worker(client, bucket_name, input_json, project_id,
 
 
 def _initialize_gads_client(client_id, developer_token, client_secret,
-                            refresh_token, login_customer_id, input_json):
+                            refresh_token, login_customer_id):
   """Initialized and returns Google Ads API client.
 
   Args:
@@ -235,7 +257,6 @@ def _initialize_gads_client(client_id, developer_token, client_secret,
     client_secret (string): Client Secret used by the API client
     refresh_token(string): Refresh Token used by the API client
     login_customer_id(string): Customer ID used for login
-    input_json(string): Configuration settings passed to the Cloud Function
 
   Returns:
     None
@@ -287,8 +308,7 @@ def gads_invoker(request):
   input_json = request.get_json(silent=True)
   if input_json and 'parent' in input_json and 'child' in input_json:
     client = _initialize_gads_client(client_id, developer_token, client_secret,
-                                     refresh_token, login_customer_id,
-                                     input_json)
+                                     refresh_token, login_customer_id)
     result = _gads_invoker_worker(client, bucket_name, input_json, project_id,
                                   full_path_topic)
     return Response('', result)
@@ -302,11 +322,17 @@ def main(argv: Sequence[str]) -> None:
 
   Args:
       argv (typing.Sequence): argument list
+
   Returns:
       None
   """
   # Replace with your testing JSON
-  input_string = '{"date": "20210316", "target_platform": "GAds", "parent": {"cid": "3533563242", "file_name": "EGO_313-4134-123_20210101_test.csv", "file_path": "input", "file_date": "20210101", "total_files": 13, "total_rows": 25000}, "child": {"file_name": "EGO_313-4134-123_20210101_test.csv---2", "num_rows": 2000}}'
+  input_string = ('{"date": "20210316", "target_platform": "GAds", "parent": '
+                  '{"cid": "3533563242", "file_name": '
+                  '"EGO_313-4134-123_20210101_test.csv", "file_path": "input", '
+                  '"file_date": "20210101", "total_files": 13, "total_rows": '
+                  '25000}, "child": {"file_name": '
+                  '"EGO_313-4134-123_20210101_test.csv---2", "num_rows": 2000}}')
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
@@ -331,11 +357,11 @@ def main(argv: Sequence[str]) -> None:
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
 
   client = _initialize_gads_client(client_id, developer_token, client_secret,
-                                   refresh_token, login_customer_id,
-                                   input_json)
+                                   refresh_token, login_customer_id)
   result = _gads_invoker_worker(client, bucket_name, input_json, project_id,
                                 full_path_topic)
   print('Test execution returned: {}'.format(result))
+
 
 if __name__ == '__main__':
   app.run(main)

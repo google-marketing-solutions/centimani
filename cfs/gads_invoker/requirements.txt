@@ -13,6 +13,7 @@
 # limitations under the License.
 
 absl-py
+flask
 google-ads
 google-cloud-storage
 google-cloud-pubsub
