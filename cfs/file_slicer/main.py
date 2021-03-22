@@ -241,16 +241,19 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
   parent_filename = os.path.basename(file_name)
   parent_filepath = os.path.dirname(file_name)
 
-  # Extract the CID from the filename. Structure is XXX_NNN-NNNN-NNN_*.csv
-  underscore_pos = parent_filename.find('_')
-  rest_of_string = -1 * (len(parent_filename) - underscore_pos - 1)
-  cid_tmp = parent_filename[rest_of_string:]
-  underscore_pos = cid_tmp.find('_')
-  parent_cid = cid_tmp[0:underscore_pos]
-  rest_of_string = -1 * (len(cid_tmp) - underscore_pos - 1)
-  date_tmp = cid_tmp[rest_of_string:]
-  underscore_pos = date_tmp.find('_')
-  parent_date = date_tmp[0:underscore_pos]
+  # Extract the CID from the filename. Structure is 
+  #     <platform>_<free-text-without-underscore>_<cid>_<login-cid>_<conv-definition-cid>_<YYYYMMDD>*.csv
+  # underscore_pos = parent_filename.find('_')
+  # rest_of_string = -1 * (len(parent_filename) - underscore_pos - 1)
+  # cid_tmp = parent_filename[rest_of_string:]
+  # underscore_pos = cid_tmp.find('_')
+  # parent_cid = cid_tmp[0:underscore_pos]
+  # rest_of_string = -1 * (len(cid_tmp) - underscore_pos - 1)
+  # date_tmp = cid_tmp[rest_of_string:]
+  # underscore_pos = date_tmp.find('_')
+  # parent_date = date_tmp[0:underscore_pos]
+
+  parent_cid, parent_date = _extract_info_from_filename(parent_filename)
 
   new_file_name = f'{processing_date}/processing/{parent_filename}'
   _mv_blob(bucket_name, file_name, bucket_name, new_file_name)
@@ -329,6 +332,31 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
 
   print('Wrote %s chunks for %s' %
         (format(num_chunks), format(parent_filename)))
+
+
+def _extract_info_from_filename(filename: str) -> (str, str):
+  """Extracts the parent cid and date from file name
+
+    File format is as follows:
+
+    <platform>_<free-text-without-underscore>_<cid>_<login-cid>_<conv-definition-cid>
+
+  Args:
+    filename: the name of the file
+
+  Returns:
+        The cid of the file
+        The date of the file
+  """
+  arr = filename.split('_')
+
+  if len(arr) < 6:
+    raise Exception('File name format is not correct')
+
+  return (arr[2].replace('-', ''), 
+          arr[5].replace('-', '')
+          )
+
 
 def _get_target_platform(file_name: str) -> str:
   """Returns the platform name from the file name.

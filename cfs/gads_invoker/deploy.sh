@@ -38,7 +38,7 @@ create_pubsub_topic "$OUTBOUND_TOPIC_NAME"
 
 CFG_FILE=$(cat $CONFIG_PATH $CUSTOM_CONFIG_PATH > ./__config.yaml)
 
-gcloud functions deploy "$DEPLOYMENT_NAME""_""$SOLUTION_PREFIX""_""$CF_NAME""" \
+gcloud functions deploy "$DEPLOYMENT_NAME""_""$SOLUTION_PREFIX""_gads_invoker" \
    --runtime python37 \
    --entry-point gads_invoker \
    --trigger-http \

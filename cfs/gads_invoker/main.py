@@ -201,7 +201,8 @@ def _upload_conversions(input_json: Dict[str, Any],
     for csv_param_info in custom_csv_params:
       if 'TimeZone' in csv_param_info:
         equal_sign_pos = csv_param_info.find('=')
-        timezone = csv_param_info[-1 * equal_sign_pos]
+        timezone = pytz.timezone(csv_param_info.split('=')[1])
+
   print('Time zone set to {}'.format(timezone))
 
   # Create a list of click conversions to be uploaded
@@ -211,7 +212,6 @@ def _upload_conversions(input_json: Dict[str, Any],
     click_conversion.gclid = conversion_info[0]
     click_conversion.conversion_action = conversion_actions_resources[
         conversion_info[1]]
-
     date_time_obj = datetime.datetime.strptime(conversion_info[2],
                                                '%Y-%m-%d %H:%M:%S')
     date_time_obj = date_time_obj + datetime.timedelta(seconds=60)
@@ -447,30 +447,17 @@ def main(argv: Sequence[str]) -> None:
   """
   # Replace with your testing JSON
 
-  input_string = ('{"date": "20210318", "target_platform": "gads", "parent": '
-                  '{"cid": "5035699692", "file_name": '
-                  '"PR_121-558-1270_1.csv", "file_path": "input", '
-                  '"file_date": "20210101", "total_files": 13, "total_rows": '
-                  '25000}, "child": {"file_name": '
-                  '"PR_121-558-1270_1.csv---1", "num_rows": 3}}')
-
-  input_string = ('{"date": "20210318", "target_platform": "gads", "parent": '
-                  '{"cid": "3533563242", "file_name": '
-                  '"EGO_353-356-3242_5_test.csv", "file_path": "input", '
-                  '"file_date": "20210101", "total_files": 13, "total_rows": '
-                  '25000}, "child": {"file_name": '
-                  '"EGO_353-356-3242_5_test.csv---1", "num_rows": 3}}')
-
-  input_string = (
-      '{"date": "20210318", "target_platform": "gads", "parent": {"cid": '
-      '"6330877141", "file_name": '
-      '"EG_633-087-7141_114-712-1970_114-712-1970_1_test.csv", "file_path": '
-      '"input", "file_date": "20210101", "total_files": 13, "total_rows": '
-      '25000}, "child": {"file_name": '
-      '"EG_633-087-7141_114-712-1970_114-712-1970_1_test.csv---1", "num_rows":'
-      ' 3}}'
-  )
-
+  input_string = (' {"date": "20210322", '
+    '"target_platform": "gads",'
+    '"extra_parameters": ["Parameters:TimeZone=Europe/Madrid", "", "", "", ""],'
+    '"parent": {"cid": "1147121970", "file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv",'
+    '"file_path": "input",' 
+    '"file_date": "20210322",' 
+    '"total_files": 7,' 
+    '"total_rows": 12326},' 
+    '"child": {"file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv---2",'
+    '"num_rows": 2000}}'
+    )
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
