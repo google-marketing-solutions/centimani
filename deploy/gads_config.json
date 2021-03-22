@@ -1,0 +1,33 @@
+{
+    "queue_config": {
+        "name": "gads_conversions-upload",
+        "rate_limits": {
+            "max_dispatches_per_second": 4,
+            "max_concurrent_dispatches": 4
+        },
+        "retry_config": {
+            "max_attempts": 10,
+            "max_retry_duration": 1750,
+            "min_backoff": 10,
+            "max_backoff": 300,
+            "max_doublings": 3
+        }
+    },
+    "credentials": {
+        "8767308703": {
+            "client_id" : "",
+            "developer_token": "",
+            "client_secret": "",
+            "refresh_token": "",
+            "login_customer_id": "8767308703"
+            },
+
+        "1147121970": {
+            "client_id" : "",
+            "developer_token": "",
+            "client_secret": "",
+            "refresh_token": "",
+            "login_customer_id": "1147121970"
+            }       
+        } 
+}

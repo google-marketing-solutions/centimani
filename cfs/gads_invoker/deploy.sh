@@ -25,6 +25,9 @@ TIMEOUT="540"
 source "$HELPERS_PATH"
 eval "$(parse_yaml $CONFIG_PATH)"
 
+CP=$(cp ../../deploy/gads_config.json ./)
+
+
 CF_NAME=$CF_NAME_GADS_INVOKER
 OUTBOUND_TOPIC_NAME=$STORE_RESPONSE_STATS_TOPIC
 

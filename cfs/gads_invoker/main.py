@@ -46,12 +46,14 @@ def _get_conversion_action_resources(client: GoogleAdsClient,
       failure error.
   """
   ga_service = client.get_service('GoogleAdsService', version='v6')
-  print('Extracting conversion information from customer ID {}'.format(customer_id))
+  print('Extracting conversion information from customer ID {}'.format(
+      customer_id))
   dict_result = {}
   query = """
       SELECT conversion_action.id, conversion_action.name FROM conversion_action
       """
   response = ga_service.search_stream(customer_id, query)
+  # response = ga_service.search_stream('1147121970', query)# customer_id, query)
   for batch in response:
     for row in batch.results:
       dict_result[
@@ -163,29 +165,33 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
   print(f'File moved from {blob_name} to {new_blob_name}')
 
 
-def _upload_conversions(input_json, project_id, reporting_topic, client,
-                        customer_id, conversions, task_retries, max_attempts,
-                        bucket_name, full_chunk_path):
+def _upload_conversions(input_json: Dict[str, Any],
+                        conversion_actions_resources: Dict[str, Any],
+                        project_id: str, reporting_topic: str,
+                        client: GoogleAdsClient, customer_id: str, conversions,
+                        task_retries: int, max_attempts: int, bucket_name: str,
+                        full_chunk_path: str):
   """Loads a chunk of conversions from GCS and sends it to the Google Ads API.
 
   Args:
     input_json: Configuration information
-    project_id (string): ID of the Google Cloud Project
-    reporting_topic (string): Pub/Sub topic for reporting messages
+    conversion_actions_resources: the info about the conversions definition
+    project_id: ID of the Google Cloud Project
+    reporting_topic: Pub/Sub topic for reporting messages
     client: Initialized instance of a Google Ads API client
-    customer_id (string): CID of parent account to associate the upload with.
-    conversions (list): Chunk of conversions containing details about each one.
-    task_retries (integer): Number of retries performed in Cloud Tasks
-    max_attempts (integer): Max number of retries configured in Cloud Tasks
-    bucket_name (string): Name of the GCS file storing the chunks
-    full_chunk_path (string): Full path to the chunk being processed
+    customer_id: CID of parent account to associate the upload with.
+    conversions: Chunk of conversions containing details about each one.
+    task_retries: Number of retries performed in Cloud Tasks
+    max_attempts: Max number of retries configured in Cloud Tasks
+    bucket_name: Name of the GCS file storing the chunks
+    full_chunk_path: Full path to the chunk being processed
 
   Returns:
     None
   """
 
-  conversion_actions_resources = _get_conversion_action_resources(
-      client, input_json['parent']['cid'])
+  # conversion_actions_resources = _get_conversion_action_resources(
+  #    client, input_json['parent']['cid'])
 
   # Set timezone, extracting it from extra_parameters if supplied
   timezone = pytz.timezone('Etc/GMT')
@@ -205,6 +211,7 @@ def _upload_conversions(input_json, project_id, reporting_topic, client,
     click_conversion.gclid = conversion_info[0]
     click_conversion.conversion_action = conversion_actions_resources[
         conversion_info[1]]
+
     date_time_obj = datetime.datetime.strptime(conversion_info[2],
                                                '%Y-%m-%d %H:%M:%S')
     date_time_obj = date_time_obj + datetime.timedelta(seconds=60)
@@ -224,24 +231,25 @@ def _upload_conversions(input_json, project_id, reporting_topic, client,
     print(f'Proceeding to upload conversions for customer_id {customer_id}')
     conversion_upload_response = conversion_upload_service.upload_click_conversions(
         customer_id, conversions_list, partial_failure=True)
+
     pubsub_payload = _add_errors_to_input_data(
-        input_json,
-        _count_partial_errors(client, conversion_upload_response)
-        )
+        input_json, _count_partial_errors(client, conversion_upload_response))
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
     # Move blob to /slices_processed after a successful execution
-    new_file_name = full_chunk_path.replace('slices_processing/', 'slices_processed/')
-    _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name )
+    new_file_name = full_chunk_path.replace('slices_processing/',
+                                            'slices_processed/')
+    _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
     return 200
   except GoogleAdsException as ex:
-    _print_errors(ex)
+    # _print_errors(ex)
     pubsub_payload = _add_errors_to_input_data(input_json,
                                                input_json['child']['num_rows'])
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
     # If last try, move blob to /slices_failed
     if task_retries + 1 == max_attempts:
-      new_file_name = full_chunk_path.replace('slices_processing/', 'slices_failed/')
-      _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name )
+      new_file_name = full_chunk_path.replace('slices_processing/',
+                                              'slices_failed/')
+      _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
     return 500
   except:
     print('Unexpected error:', sys.exc_info()[0])
@@ -251,39 +259,47 @@ def _upload_conversions(input_json, project_id, reporting_topic, client,
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
     # If last try, move blob to /slices_failed
     if task_retries + 1 == max_attempts:
-      new_file_name = full_chunk_path.replace('slices_processing/', 'slices_failed/')
-      _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name )
+      new_file_name = full_chunk_path.replace('slices_processing/',
+                                              'slices_failed/')
+      _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
     return 500
+
 
 def _print_errors(ex):
   print(f'Request with ID "{ex.request_id}" failed with status '
-          f'"{ex.error.code().name}" and includes the following errors:')
+        f'"{ex.error.code().name}" and includes the following errors:')
   for error in ex.failure.errors:
-      print(f'\tError with message "{error.message}".')
-      if error.location:
-        for field_path_element in error.location.field_path_elements:
-          print(f'\t\tOn field: {field_path_element.field_name}')
+    print(f'\tError with message "{error.message}".')
+    if error.location:
+      for field_path_element in error.location.field_path_elements:
+        print(f'\t\tOn field: {field_path_element.field_name}')
+
 
 def _send_pubsub_message(project_id, reporting_topic, pubsub_payload):
   publisher = pubsub_v1.PublisherClient()
   topic_path_reporting = publisher.topic_path(project_id, reporting_topic)
   publisher.publish(
-        topic_path_reporting, data=bytes(json.dumps(pubsub_payload),
-                                         'utf-8')).result()
+      topic_path_reporting, data=bytes(json.dumps(pubsub_payload),
+                                       'utf-8')).result()
 
 
-def _gads_invoker_worker(client, bucket_name, input_json, project_id,
-                         reporting_topic, task_retries, max_attempts):
+def _gads_invoker_worker(client: GoogleAdsClient, bucket_name: str,
+                         input_json: Dict[str, Any],
+                         conversion_actions_resources: Dict[str, Any],
+                         project_id: str, reporting_topic: str,
+                         task_retries: int, max_attempts: int):
   """Loads a chunk of conversions from GCS and sends it to the Google Ads API.
 
   Args:
     client: Initialized instance of a Google Ads API client
-    bucket_name (string): Name of the bucket to read the chunk from
-    input_json (string): Configuration information.
-    project_id (string): ID of the Google Cloud Project
-    reporting_topic (string): Pub/Sub topic for reporting messages
-    task_retries (integer): Number of retries performed in Cloud Tasks
-    max_attempts (integer): Max number of retries configured in Cloud Tasks
+    bucket_name: Name of the bucket to read the chunk from
+    input_json: Configuration information.
+    conversion_actions_resources: the object containing the info about the
+      actions
+    project_id: ID of the Google Cloud Project
+    reporting_topic: Pub/Sub topic for reporting messages
+    task_retries: Number of retries performed in Cloud Tasks
+    max_attempts: Max number of retries configured in Cloud Tasks
 
   Returns:
     None
@@ -298,36 +314,66 @@ def _gads_invoker_worker(client, bucket_name, input_json, project_id,
   conversions_list = csv.reader(io.StringIO(conversions_blob))
   # Skip header line
   next(conversions_list)
-  result = _upload_conversions(input_json, project_id, reporting_topic, client,
-                               customer_id, conversions_list, task_retries,
-                               max_attempts, bucket_name, full_chunk_name,
-                               )
+  result = _upload_conversions(
+      input_json,
+      conversion_actions_resources,
+      project_id,
+      reporting_topic,
+      client,
+      customer_id,
+      conversions_list,
+      task_retries,
+      max_attempts,
+      bucket_name,
+      full_chunk_name,
+  )
   return result
 
 
-def _initialize_gads_client(client_id, developer_token, client_secret,
-                            refresh_token, login_customer_id):
+def _initialize_gads_client(login_customer_id: str) -> GoogleAdsClient:
   """Initialized and returns Google Ads API client.
 
   Args:
-    client_id (string): Client ID used by the API client
-    developer_token (string): Developer Token used by the API client
-    client_secret (string): Client Secret used by the API client
-    refresh_token(string): Refresh Token used by the API client
-    login_customer_id(string): Customer ID used for login
+    login_customer_id: the customer id to act as
 
   Returns:
-    None
+    GoogleAdsClient
   """
-  credentials = {
-      'developer_token': developer_token,
-      'client_id': client_id,
-      'client_secret': client_secret,
-      'refresh_token': refresh_token,
-      'login_customer_id': login_customer_id
-  }
-  client = GoogleAdsClient.load_from_dict(credentials)
-  return client
+
+  with open('gads_credentials.json') as json_file:
+    data = json.load(json_file)
+
+  if data["credentials"][login_customer_id]:
+    client = GoogleAdsClient.load_from_dict(data[login_customer_id])
+    return client
+  else:
+    raise Exception(f'Credentias for {login_customer_id} not found')
+
+
+def _extract_cids(input_json: Dict[str, Any]) -> (str, str, str):
+  """Extracts the 3 relevant cids from the input data.
+
+    File format is as follows:
+
+    gads_<free-text-without-underscore>_<cid>_<login-cid>_<conv-definition-cid>
+
+  Args:
+    input_json: Dict containing the incoming input message payload.
+
+  Returns:
+        The cid for the account the conversions were extracted from.<cid>
+        The cid of the customer to login as.<login-cid>
+        The cid of the account where the conversions are
+        defined.<conv-definiton-cid>
+
+  """
+  arr = input_json['parent']['file_name'].split('_')
+
+  if len(arr) < 4:
+    raise Exception('File name format is not correct')
+
+  return (arr[1].replace('-', ''), arr[2].replace('-',
+                                                  ''), arr[3].replace('-', ''))
 
 
 def gads_invoker(request):
@@ -353,11 +399,6 @@ def gads_invoker(request):
     sys.exit(1)
 
   bucket_name = os.environ['DEFAULT_GCS_BUCKET']
-  client_id = os.environ['CLIENT_ID']
-  developer_token = os.environ['DEVELOPER_TOKEN']
-  client_secret = os.environ['CLIENT_SECRET']
-  refresh_token = os.environ['REFRESH_TOKEN']
-  login_customer_id = os.environ['LOGIN_CUSTOMER_ID']
   project_id = os.environ['DEFAULT_GCP_PROJECT']
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
@@ -372,11 +413,17 @@ def gads_invoker(request):
     task_retries = request.headers.get('X-AppEngine-TaskRetryCount')
     print('Got {} task retries from Cloud Tasks'.format(task_retries))
 
+  (file_cid, conversions_holder_cid, login_cid) = _extract_cids(input_json)
+
   if input_json and 'parent' in input_json and 'child' in input_json:
-    client = _initialize_gads_client(client_id, developer_token, client_secret,
-                                     refresh_token, login_customer_id)
-    result = _gads_invoker_worker(client, bucket_name, input_json, project_id,
+
+    client = _initialize_gads_client(login_cid)
+    conversions_resources = _get_conversion_action_resources(
+        client, conversions_holder_cid)
+    result = _gads_invoker_worker(client, bucket_name, input_json,
+                                  conversions_resources, project_id,
                                   full_path_topic, task_retries, max_attempts)
+
     return Response('', result)
   else:
     print('ERROR: Configuration not found, please POST it in your request')
@@ -393,12 +440,31 @@ def main(argv: Sequence[str]) -> None:
       None
   """
   # Replace with your testing JSON
+
   input_string = ('{"date": "20210318", "target_platform": "gads", "parent": '
-                  '{"cid": "3533563242", "file_name": '
-                  '"EGO_313-4134-123_20210101_test.csv", "file_path": "input", '
+                  '{"cid": "5035699692", "file_name": '
+                  '"PR_121-558-1270_1.csv", "file_path": "input", '
                   '"file_date": "20210101", "total_files": 13, "total_rows": '
                   '25000}, "child": {"file_name": '
-                  '"EGO_313-4134-123_20210101_test.csv---20", "num_rows": 3}}')
+                  '"PR_121-558-1270_1.csv---1", "num_rows": 3}}')
+
+  input_string = ('{"date": "20210318", "target_platform": "gads", "parent": '
+                  '{"cid": "3533563242", "file_name": '
+                  '"EGO_353-356-3242_5_test.csv", "file_path": "input", '
+                  '"file_date": "20210101", "total_files": 13, "total_rows": '
+                  '25000}, "child": {"file_name": '
+                  '"EGO_353-356-3242_5_test.csv---1", "num_rows": 3}}')
+
+  input_string = (
+      '{"date": "20210318", "target_platform": "gads", "parent": {"cid": '
+      '"6330877141", "file_name": '
+      '"EG_633-087-7141_114-712-1970_114-712-1970_1_test.csv", "file_path": '
+      '"input", "file_date": "20210101", "total_files": 13, "total_rows": '
+      '25000}, "child": {"file_name": '
+      '"EG_633-087-7141_114-712-1970_114-712-1970_1_test.csv---1", "num_rows":'
+      ' 3}}'
+  )
+
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
@@ -411,11 +477,6 @@ def main(argv: Sequence[str]) -> None:
     sys.exit(1)
 
   bucket_name = os.environ['DEFAULT_GCS_BUCKET']
-  client_id = os.environ['CLIENT_ID']
-  developer_token = os.environ['DEVELOPER_TOKEN']
-  client_secret = os.environ['CLIENT_SECRET']
-  refresh_token = os.environ['REFRESH_TOKEN']
-  login_customer_id = os.environ['LOGIN_CUSTOMER_ID']
   project_id = os.environ['DEFAULT_GCP_PROJECT']
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
@@ -424,10 +485,15 @@ def main(argv: Sequence[str]) -> None:
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
   task_retries = -1
 
-  client = _initialize_gads_client(client_id, developer_token, client_secret,
-                                   refresh_token, login_customer_id)
-  result = _gads_invoker_worker(client, bucket_name, input_json, project_id,
-                                  full_path_topic, task_retries, max_attempts)
+  (file_cid, conversions_holder_cid, login_cid) = _extract_cids(input_json)
+
+  client = _initialize_gads_client(login_cid)
+  conversions_resources = _get_conversion_action_resources(
+      client, conversions_holder_cid)
+
+  result = _gads_invoker_worker(client, bucket_name, input_json,
+                                conversions_resources, project_id,
+                                full_path_topic, task_retries, max_attempts)
   print('Test execution returned: {}'.format(result))
 
 

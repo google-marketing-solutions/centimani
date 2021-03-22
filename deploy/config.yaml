@@ -26,13 +26,6 @@ DEFAULT_GCP_PROJECT: 'hectorparra-test'
 # Type gcloud compute regions list to find out the different values
 DEFAULT_GCP_REGION: 'europe-west1'
 
-# Cloud Function names
-# =====================================================================
-CF_NAME_SLICER: 'file_slicer'
-CF_NAME_GADS_INVOKER: 'gads_invoker'
-CF_NAME_STORE_RESPONSE_STATS: 'store_response_stats'
-CF_NAME_REPORTING_DATA_EXTRACTOR: 'reporting_data_extractor'
-
 
 # Cloud Tasks settings
 # =====================================================================
@@ -62,18 +55,25 @@ BQ_GCP_BROAD_REGION: 'EU'
 TIMEZONE: 'Europe/Madrid'
 REPORTING_DATA_POLLING_CONFIG: '\*/5 \* \* \* \*'
 
+
+# =====================================================================
+# =================== DO NOT MODIFY BELOW THIS LINE ===================
+# =====================================================================
+
+# Cloud Function names
+# =====================================================================
+CF_NAME_SLICER: 'file_slicer'
+CF_NAME_GADS_INVOKER: 'gads_invoker'
+CF_NAME_STORE_RESPONSE_STATS: 'store_response_stats'
+CF_NAME_REPORTING_DATA_EXTRACTOR: 'reporting_data_extractor'
+
+
 # Pub/Sub
 # =====================================================================
 # Cloud Pub/Sub settings (It will be automatically prefixed by DEPLOYMENT_NAME.SOLUTION_PREFIX)
 REPORTING_DATA_EXTRACTOR_TOPIC: 'extract_report_data'
 STORE_RESPONSE_STATS_TOPIC: 'store_response'
 
-# Firestore
+# Available platforms
 # =====================================================================
-
-# Google Ads client settings
-CLIENT_ID: ''
-DEVELOPER_TOKEN: ''
-CLIENT_SECRET: ''
-REFRESH_TOKEN: ''
-LOGIN_CUSTOMER_ID: ''
+GADS: 'gads'
