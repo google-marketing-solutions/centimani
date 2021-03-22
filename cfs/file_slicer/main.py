@@ -141,7 +141,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
   task['http_request']['body'] = converted_payload
 
   # Use the client to build and send the task.
-  response = client.create_task(request={'parent': queue.name, 'task': task})
+  client.create_task(request={'parent': queue.name, 'task': task})
   # print('Created task {}'.format(response.name))
 
 
@@ -243,16 +243,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
 
   # Extract the CID from the filename. Structure is 
   #     <platform>_<free-text-without-underscore>_<cid>_<login-cid>_<conv-definition-cid>_<YYYYMMDD>*.csv
-  # underscore_pos = parent_filename.find('_')
-  # rest_of_string = -1 * (len(parent_filename) - underscore_pos - 1)
-  # cid_tmp = parent_filename[rest_of_string:]
-  # underscore_pos = cid_tmp.find('_')
-  # parent_cid = cid_tmp[0:underscore_pos]
-  # rest_of_string = -1 * (len(cid_tmp) - underscore_pos - 1)
-  # date_tmp = cid_tmp[rest_of_string:]
-  # underscore_pos = date_tmp.find('_')
-  # parent_date = date_tmp[0:underscore_pos]
-
+  
   parent_cid, parent_date = _extract_info_from_filename(parent_filename)
 
   new_file_name = f'{processing_date}/processing/{parent_filename}'
@@ -481,7 +472,6 @@ def file_slicer(data, context=Optional[Context]):
       _file_slicer_worker(client, file_name, bucket, max_chunk_lines, project, location,
                           queue_config, invoker_url, service_account, target_platform)
     except Exception as e:
-      raise
       now = datetime.datetime.now()
       processing_date = now.strftime('%Y%m%d')
       file_name = os.path.basename(file_name)
