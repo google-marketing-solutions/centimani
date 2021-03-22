@@ -53,7 +53,6 @@ def _get_conversion_action_resources(client: GoogleAdsClient,
       SELECT conversion_action.id, conversion_action.name FROM conversion_action
       """
   response = ga_service.search_stream(customer_id, query)
-  # response = ga_service.search_stream('1147121970', query)# customer_id, query)
   for batch in response:
     for row in batch.results:
       dict_result[
@@ -200,7 +199,6 @@ def _upload_conversions(input_json: Dict[str, Any],
     timezone = pytz.timezone('Etc/GMT')
     for csv_param_info in custom_csv_params:
       if 'TimeZone' in csv_param_info:
-        equal_sign_pos = csv_param_info.find('=')
         timezone = pytz.timezone(csv_param_info.split('=')[1])
 
   print('Time zone set to {}'.format(timezone))
@@ -220,7 +218,10 @@ def _upload_conversions(input_json: Dict[str, Any],
     click_conversion.conversion_date_time = adjusted_date_str[:
                                                               -2] + ':' + adjusted_date_str[
                                                                   -2:]
-    click_conversion.conversion_value = float(conversion_info[3])
+    if conversion_info[3].strip():
+      click_conversion.conversion_value = float(conversion_info[3])
+    else:
+      click_conversion.conversion_value = 0
     click_conversion.currency_code = conversion_info[4]
     conversions_list.append(click_conversion)
 
@@ -231,7 +232,6 @@ def _upload_conversions(input_json: Dict[str, Any],
     print(f'Proceeding to upload conversions for customer_id {customer_id}')
     conversion_upload_response = conversion_upload_service.upload_click_conversions(
         customer_id, conversions_list, partial_failure=True)
-
     pubsub_payload = _add_errors_to_input_data(
         input_json, _count_partial_errors(client, conversion_upload_response))
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
@@ -343,7 +343,7 @@ def _initialize_gads_client(login_customer_id: str) -> GoogleAdsClient:
   with open('gads_config.json') as json_file:
     data = json.load(json_file)
 
-  if data["credentials"][login_customer_id]:
+  if login_customer_id in data["credentials"]:
     client = GoogleAdsClient.load_from_dict(data["credentials"][login_customer_id])
     return client
   else:
@@ -355,7 +355,7 @@ def _get_max_attempts() -> int:
     data = json.load(json_file)
     return data['queue_config']['retry_config']['max_attempts']
 
-  
+
 
 def _extract_cids(input_json: Dict[str, Any]) -> (str, str, str):
   """Extracts the 3 relevant cids from the input data.
@@ -379,8 +379,8 @@ def _extract_cids(input_json: Dict[str, Any]) -> (str, str, str):
   if len(arr) < 4:
     raise Exception('File name format is not correct')
 
-  return (arr[1].replace('-', ''), arr[2].replace('-',
-                                                  ''), arr[3].replace('-', ''))
+  return (arr[2].replace('-', ''), arr[3].replace('-',
+                                                  ''), arr[4].replace('-', ''))
 
 
 def gads_invoker(request):
@@ -398,7 +398,7 @@ def gads_invoker(request):
   if not all(elem in os.environ for elem in [
       'DEFAULT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
       'STORE_RESPONSE_STATS_TOPIC', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX'
-      
+
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
@@ -415,13 +415,11 @@ def gads_invoker(request):
   input_json = request.get_json(silent=True)
 
   task_retries = -1
-  if 'X-AppEngine-TaskRetryCount' in request.headers:
-    task_retries = request.headers.get('X-AppEngine-TaskRetryCount')
+  if 'X-Cloudtasks-Taskretrycount' in request.headers:
+    task_retries = request.headers.get('X-Cloudtasks-Taskretrycount')
     print('Got {} task retries from Cloud Tasks'.format(task_retries))
-
-  (file_cid, conversions_holder_cid, login_cid) = _extract_cids(input_json)
-
-  if input_json and 'parent' in input_json and 'child' in input_json:
+  try:
+    (_, login_cid, conversions_holder_cid) = _extract_cids(input_json)
 
     client = _initialize_gads_client(login_cid)
     conversions_resources = _get_conversion_action_resources(
@@ -431,10 +429,18 @@ def gads_invoker(request):
                                   full_path_topic, task_retries, max_attempts)
 
     return Response('', result)
-  else:
-    print('ERROR: Configuration not found, please POST it in your request')
-    return Response('', 400)
-
+  except Exception:
+    print('ERROR: Unexpected exception raised during the process')
+    pubsub_payload = _add_errors_to_input_data(input_json,
+                                               input_json['child']['num_rows'])
+    _send_pubsub_message(project_id, full_path_topic, pubsub_payload)
+    datestamp = input_json['date']
+    chunk_filename = input_json['child']['file_name']
+    full_chunk_path = datestamp + '/slices_processing/' + chunk_filename
+    new_file_name = full_chunk_path.replace('slices_processing/',
+                                            'slices_failed/')
+    _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
+    return Response('', 200)
 
 def main(argv: Sequence[str]) -> None:
   """Main function for testing using the command line.
@@ -451,11 +457,11 @@ def main(argv: Sequence[str]) -> None:
     '"target_platform": "gads",'
     '"extra_parameters": ["Parameters:TimeZone=Europe/Madrid", "", "", "", ""],'
     '"parent": {"cid": "1147121970", "file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv",'
-    '"file_path": "input",' 
-    '"file_date": "20210322",' 
-    '"total_files": 7,' 
-    '"total_rows": 12326},' 
-    '"child": {"file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv---2",'
+    '"file_path": "input",'
+    '"file_date": "20210322",'
+    '"total_files": 7,'
+    '"total_rows": 12326},'
+    '"child": {"file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv---1",'
     '"num_rows": 2000}}'
     )
   input_json = json.loads(input_string)
@@ -477,17 +483,19 @@ def main(argv: Sequence[str]) -> None:
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
   task_retries = -1
 
-  (file_cid, conversions_holder_cid, login_cid) = _extract_cids(input_json)
+  try:
+    (_, login_cid, conversions_holder_cid) = _extract_cids(input_json)
 
-  client = _initialize_gads_client(login_cid)
-  conversions_resources = _get_conversion_action_resources(
-      client, conversions_holder_cid)
+    client = _initialize_gads_client(login_cid)
+    conversions_resources = _get_conversion_action_resources(
+        client, conversions_holder_cid)
 
-  result = _gads_invoker_worker(client, bucket_name, input_json,
-                                conversions_resources, project_id,
-                                full_path_topic, task_retries, max_attempts)
-  print('Test execution returned: {}'.format(result))
-
+    result = _gads_invoker_worker(client, bucket_name, input_json,
+                                  conversions_resources, project_id,
+                                  full_path_topic, task_retries, max_attempts)
+    print('Test execution returned: {}'.format(result))
+  except Exception:
+    print('Unexpected exception raised during the process')
 
 if __name__ == '__main__':
   app.run(main)
