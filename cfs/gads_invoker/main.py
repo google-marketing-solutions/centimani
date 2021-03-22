@@ -23,6 +23,8 @@ import json
 import os
 import pytz
 import sys
+import logging
+
 from typing import Any, Dict, Sequence
 
 from absl import app
@@ -446,6 +448,9 @@ def main(argv: Sequence[str]) -> None:
       None
   """
   # Replace with your testing JSON
+
+  logging.basicConfig(level=logging.INFO, format='[%(asctime)s - %(levelname)s] %(message).5000s')
+  logging.getLogger('google.ads.google_ads.client').setLevel(logging.WARNING)
 
   input_string = (' {"date": "20210322", '
     '"target_platform": "gads",'
