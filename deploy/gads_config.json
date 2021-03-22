@@ -1,6 +1,6 @@
 {
     "queue_config": {
-        "name": "gads_conversions-upload",
+        "name": "gads-conversions-upload",
         "rate_limits": {
             "max_dispatches_per_second": 4,
             "max_concurrent_dispatches": 4

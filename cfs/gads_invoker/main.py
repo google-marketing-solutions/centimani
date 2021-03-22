@@ -340,15 +340,22 @@ def _initialize_gads_client(login_customer_id: str) -> GoogleAdsClient:
     GoogleAdsClient
   """
 
-  with open('gads_credentials.json') as json_file:
+  with open('gads_config.json') as json_file:
     data = json.load(json_file)
 
   if data["credentials"][login_customer_id]:
-    client = GoogleAdsClient.load_from_dict(data[login_customer_id])
+    client = GoogleAdsClient.load_from_dict(data["credentials"][login_customer_id])
     return client
   else:
     raise Exception(f'Credentias for {login_customer_id} not found')
 
+def _get_max_attempts() -> int:
+
+   with open('gads_config.json') as json_file:
+    data = json.load(json_file)
+    return data['queue_config']['retry_config']['max_attempts']
+
+  
 
 def _extract_cids(input_json: Dict[str, Any]) -> (str, str, str):
   """Extracts the 3 relevant cids from the input data.
@@ -389,10 +396,9 @@ def gads_invoker(request):
         <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
   """
   if not all(elem in os.environ for elem in [
-      'DEFAULT_GCS_BUCKET', 'CLIENT_ID', 'DEVELOPER_TOKEN', 'CLIENT_SECRET',
-      'REFRESH_TOKEN', 'LOGIN_CUSTOMER_ID', 'DEFAULT_GCP_PROJECT',
-      'STORE_RESPONSE_STATS_TOPIC', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX',
-      'CT_QUEUE_MAX_ATTEMPTS'
+      'DEFAULT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
+      'STORE_RESPONSE_STATS_TOPIC', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX'
+      
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
@@ -403,7 +409,7 @@ def gads_invoker(request):
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
-  max_attempts = os.environ['CT_QUEUE_MAX_ATTEMPTS']
+  max_attempts = _get_max_attempts()
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
 
   input_json = request.get_json(silent=True)
@@ -468,8 +474,7 @@ def main(argv: Sequence[str]) -> None:
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
-      'DEFAULT_GCS_BUCKET', 'CLIENT_ID', 'DEVELOPER_TOKEN', 'CLIENT_SECRET',
-      'REFRESH_TOKEN', 'LOGIN_CUSTOMER_ID', 'DEFAULT_GCP_PROJECT',
+      'DEFAULT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
       'STORE_RESPONSE_STATS_TOPIC'
   ]):
     print('Cannot proceed, there are missing input values, '
@@ -481,7 +486,7 @@ def main(argv: Sequence[str]) -> None:
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
-  max_attempts = os.environ['CT_QUEUE_MAX_ATTEMPTS']
+  max_attempts = _get_max_attempts()
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
   task_retries = -1
 

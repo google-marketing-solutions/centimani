@@ -42,48 +42,10 @@ def _get_file_parameters(csv_line: str) -> Dict[str, Any]:
   else:
     return []
   
-def _get_queue_config(client: tasks_v2.CloudTasksClient, project: str,
-                      location: str, queue_name: str,
-                      max_dispatches_per_second: int,
-                      max_concurrent_dispatches: int, max_attempts: int,
-                      max_retry_seconds: int, min_backoff_seconds: int,
-                      max_backoff_seconds: int,
-                      max_doublings: int) -> Dict[str, Any]:
-
-  min_backoff = duration_pb2.Duration()
-  min_backoff.seconds = min_backoff_seconds
-
-  max_backoff = duration_pb2.Duration()
-  max_backoff.seconds = max_backoff_seconds
-
-  # With the former values for min and max_backoff, plus 3 max_doublings,
-  # retries happen after 10, 20, 40, 80, 160, 240, 300, 300, 300 and 300
-  # seconds, respectively
-
-  max_retry = duration_pb2.Duration()
-  # Max retry = 10 + 20 + 40 + 8 + 160 + 240 + 300 + 300 + 300 + 300
-  max_retry.seconds = max_retry_seconds
-
-  queue_config = {
-      'name': client.queue_path(project, location, queue_name),
-      'rate_limits': {
-          'max_dispatches_per_second': max_dispatches_per_second,
-          'max_concurrent_dispatches': max_concurrent_dispatches,
-      },
-      'retry_config': {
-          'max_attempts': max_attempts,
-          'max_retry_duration': max_retry,
-          'min_backoff': min_backoff,
-          'max_backoff': max_backoff,
-          'max_doublings': max_doublings,
-      }
-  }
-
-  return queue_config
-
 
 def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
                                                                         Any]):
+
   # Check if the queue exists
   try:
     queue = client.get_queue(name=queue_config['name'])
@@ -94,8 +56,7 @@ def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
     print('Queue not found, creating it')
     # Otherwise create the queue
     # Construct the fully qualified location path.
-    q_parent = queue_config['name'].split("/")[:-1]
-
+    q_parent = '/'.join(queue_config['name'].split('/')[:-2])
     queue = client.create_queue(request={
         'parent': q_parent,
         'queue': queue_config
@@ -111,7 +72,7 @@ def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
 def _create_new_task(client, queue, project, location, queue_name, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
-                     processing_date, url, extra_parameters, service_account):
+                     processing_date, url, extra_parameters, service_account, target_platform):
   """Creates a new task in Cloud Tasks to process a chunk of conversions.
 
   Args:
@@ -132,6 +93,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
     url (string): url of the cloud function to be triggered by the task.
     extra_parameters: string array representing the extra parameters for the platform
     service_account: string representing the service account to use for auth
+    target_platform: string representing the platform to send the task to
 
   Returns:
       None
@@ -150,7 +112,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
 
   payload_json = {
       'date': processing_date,
-      'target_platform': 'gads',
+      'target_platform': target_platform,
       'extra_parameters': extra_parameters,
       'parent': {
           'cid': parent_cid.replace('-', ''),
@@ -251,7 +213,7 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
 
 
 def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project,
-                        location, queue_config, invoker_url, service_account):
+                        location, queue_config, invoker_url, service_account, target_platform):
   """Splits a file into smaller chunks with a specific number of lines.
 
   Args:
@@ -264,6 +226,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
       queue_config (Dict[str, Any]): name of the Cloud Tasks queue to use
       invoker_url (string): full url to the gAds Invoker Cloud Function
       service_account (string): represents the SA for authentication
+      target_platform (string): the platform to send the tasks to
 
   Returns:
       None
@@ -271,7 +234,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
 
   # Init Cloud Task Queue
   queue = _upsert_queue(client, queue_config)
-
+  
   # Move file to processing folder
   now = datetime.datetime.now()
   processing_date = now.strftime('%Y%m%d')
@@ -348,7 +311,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
                        parent_cid, parent_filename, parent_filepath,
                        parent_numchunks, parent_numrows, child_filename,
                        child_numrows, parent_date, processing_date, invoker_url,
-                       extra_params, service_account)
+                       extra_params, service_account, target_platform)
       chunk_lines = 0
       chunk_buffer = []
 
@@ -362,11 +325,85 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
                      processing_date, invoker_url,
-                     extra_params, service_account)
+                     extra_params, service_account, target_platform)
 
   print('Wrote %s chunks for %s' %
         (format(num_chunks), format(parent_filename)))
 
+def _get_target_platform(file_name: str) -> str:
+  """Returns the platform name from the file name.
+
+     The first token of the file name will correspond to the target platform identifier.
+
+  Args:
+      file_name: the name of the input file to the slicer
+
+  Returns:
+      A string representing the target platform
+  """
+  return file_name.split('_')[0].lower()
+
+def _get_invoker_url(platform: str,
+                     location: str,
+                     project: str,
+                     deployment_name: str,
+                     solution_prefix: str) -> str:
+  
+  """Returns the url to invoke the cloud function for the specific platform.
+
+  Args:
+      platform: the target platform
+      location: the project location of the cloud function
+      project: the project where the cloud function is deployed
+      deployment_name: the name given to the deployment
+      solution_prefix: the prefix to identify the solution deployed
+
+  Returns:
+      The URL to invoke the cloud function
+  """
+  return f'https://{location}-{project}.cloudfunctions.net/{deployment_name}_{solution_prefix}_{platform}_invoker'
+
+
+def _get_queue_config(client: tasks_v2.CloudTasksClient,
+                      project: str,
+                      location: str,
+                      platform: str) -> Dict[str, Any]:
+
+  config_file = f'{platform}_config.json'
+
+  with open(config_file) as json_file:
+    data = json.load(json_file)
+
+  min_backoff = duration_pb2.Duration()
+  min_backoff.seconds = data['queue_config']['retry_config']['min_backoff']
+
+  max_backoff = duration_pb2.Duration()
+  max_backoff.seconds = data['queue_config']['retry_config']['max_backoff']
+
+  # With the former values for min and max_backoff, plus 3 max_doublings,
+  # retries happen after 10, 20, 40, 80, 160, 240, 300, 300, 300 and 300
+  # seconds, respectively
+
+  max_retry = duration_pb2.Duration()
+  # Max retry = 10 + 20 + 40 + 8 + 160 + 240 + 300 + 300 + 300 + 300
+  max_retry.seconds = data['queue_config']['retry_config']['max_retry_duration']
+
+  queue_config = {
+      'name': client.queue_path(project, location, data['queue_config']['name']),
+      'rate_limits': {
+          'max_dispatches_per_second': data['queue_config']['rate_limits']['max_dispatches_per_second'],
+          'max_concurrent_dispatches': data['queue_config']['rate_limits']['max_concurrent_dispatches'],
+      },
+      'retry_config': {
+          'max_attempts': data['queue_config']['retry_config']['max_attempts'],
+          'max_retry_duration': max_retry,
+          'min_backoff': min_backoff,
+          'max_backoff': max_backoff,
+          'max_doublings': data['queue_config']['retry_config']['max_doublings'],
+      }
+  }
+
+  return queue_config
 
 def file_slicer(data, context=Optional[Context]):
   """Background Cloud Function to be triggered by Cloud Storage.
@@ -382,59 +419,51 @@ def file_slicer(data, context=Optional[Context]):
       None
   """
   del context  # Not used
-  filename = data['name']
+  file_name = data['name']
   bucket = data['bucket']
   if not all(elem in os.environ for elem in [
       'MAX_CHUNK_LINES', 'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
-      'CT_QUEUE_NAME', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'CF_NAME_GADS_INVOKER',
-      'SERVICE_ACCOUNT'
+      'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'SERVICE_ACCOUNT'
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
-  if filename.endswith('.csv') and filename.startswith('input/'):
+  if file_name.endswith('.csv') and file_name.startswith('input/'):
     # Create a client.
     client = tasks_v2.CloudTasksClient()
-    print('Processing file %s' % filename)
+    print('Processing file %s' % file_name)
     max_chunk_lines = int(os.environ['MAX_CHUNK_LINES'])
     project = os.environ['DEFAULT_GCP_PROJECT']
     location = os.environ['DEFAULT_GCP_REGION']
-    queue_name = os.environ['CT_QUEUE_NAME']
     deployment_name = os.environ['DEPLOYMENT_NAME']
     solution_prefix = os.environ['SOLUTION_PREFIX']
-    cf_name_invoker = os.environ['CF_NAME_GADS_INVOKER']
-    invoker_url = f'https://{location}-{project}.cloudfunctions.net/{deployment_name}_{solution_prefix}_{cf_name_invoker}'
     service_account = os.environ['SERVICE_ACCOUNT']
-    max_dispatches_per_second = int(
-        os.environ['CT_QUEUE_MAX_DISPATCHES_PER_SECOND'])
-    max_concurrent_dispatches = int(
-        os.environ['CT_QUEUE_MAX_CONCURRENT_DISPATCHES'])
-    max_attempts = int(os.environ['CT_QUEUE_MAX_ATTEMPTS'])
-    max_retry_seconds = int(os.environ['CT_QUEUE_MAX_RETRY_SECONDS'])
-    min_backoff_seconds = int(os.environ['CT_QUEUE_MIN_BACKOFF_SECONDS'])
-    max_backoff_seconds = int(os.environ['CT_QUEUE_MAX_BACKOFF_SECONDS'])
-    max_doublings = int(os.environ['CT_QUEUE_MAX_DOUBLINGS'])
+    
 
     try:
-      queue_config = _get_queue_config(client, project, location, queue_name,
-                                      max_dispatches_per_second,
-                                      max_concurrent_dispatches, max_attempts,
-                                      max_retry_seconds, min_backoff_seconds,
-                                      max_backoff_seconds, max_doublings)
-      _file_slicer_worker(client, filename, bucket, max_chunk_lines, project, location,
-                          queue_config, invoker_url, service_account)
+
+      target_platform = _get_target_platform(os.path.basename(file_name))
+      queue_config = _get_queue_config(client, project, location, target_platform)
+      
+      invoker_url = _get_invoker_url(target_platform,
+                     location,
+                     project,
+                     deployment_name,
+                     solution_prefix)
+      _file_slicer_worker(client, file_name, bucket, max_chunk_lines, project, location,
+                          queue_config, invoker_url, service_account, target_platform)
     except Exception as e:
       raise
       now = datetime.datetime.now()
       processing_date = now.strftime('%Y%m%d')
-      filename = os.path.basename(filename)
-      file_name = f'{processing_date}/processing/{filename}'
-      new_file_name = f'{processing_date}/failed/{filename}'
+      file_name = os.path.basename(file_name)
+      file_name = f'{processing_date}/processing/{file_name}'
+      new_file_name = f'{processing_date}/failed/{file_name}'
       _mv_blob(bucket, file_name, bucket, new_file_name)
       
 
   else:
-    print('Bypassing file %s' % filename)
+    print('Bypassing file %s' % file_name)
 
 
 def main(argv: Sequence[str]) -> None:
@@ -451,16 +480,7 @@ def main(argv: Sequence[str]) -> None:
     "name": argv[1]
     }
   file_slicer(data=data)
-  #if len(argv) != 3:
-  #  raise app.UsageError('Please make sure you are passing all required params')
-  #else:
-    # Params expected are filename, bucket, max_chunk_lines, project, location,
-    # queue_name and invoker CF full url
-  #  _file_slicer_worker(
-  #      argv[1], argv[2], argv[3], argv[4], argv[5],
-  #      _get_queue_config(
-  #          project=argv[4], location=argv[5], queue_name=argv[6]), argv[7])
-
+ 
 
 if __name__ == '__main__':
   app.run(main)
