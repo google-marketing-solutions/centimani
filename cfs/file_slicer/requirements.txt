@@ -2,4 +2,5 @@ absl-py
 functions-framework
 google-cloud-storage
 google-cloud-tasks
+google-cloud-secret-manager
 

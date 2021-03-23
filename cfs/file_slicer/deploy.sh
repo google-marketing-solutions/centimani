@@ -23,8 +23,6 @@ TIMEOUT="540"
 source "$HELPERS_PATH"
 eval "$(parse_yaml $CONFIG_PATH)"
 
-CP=$(cp ../../deploy/*_config.json ./)
-
 CF_NAME=$CF_NAME_SLICER
 CFG_FILE=$(cat $CONFIG_PATH $CUSTOM_CONFIG_PATH > ./__config.yaml)
 
