@@ -27,14 +27,16 @@ import os
 import random
 import string
 import sys
-from typing import Any, Dict, Sequence, Optional
 
+
+from typing import Any, Dict, Sequence, Optional
 from absl import app
 from google.cloud import storage
 from google.cloud import tasks_v2
 from google.api_core.exceptions import NotFound
 from google.cloud.functions_v1.context import Context
 from google.protobuf import duration_pb2
+from google.cloud import secretmanager
 
 def _get_file_parameters(csv_line: str) -> Dict[str, Any]:
   if 'Parameters' in csv_line[0]:
@@ -385,13 +387,12 @@ def _get_invoker_url(platform: str,
 
 def _get_queue_config(client: tasks_v2.CloudTasksClient,
                       project: str,
+                      deployment_name: str,
+                      solution_prefix: str,
                       location: str,
                       platform: str) -> Dict[str, Any]:
 
-  config_file = f'{platform}_config.json'
-
-  with open(config_file) as json_file:
-    data = json.load(json_file)
+  data = _read_platform_config_from_secret(project,f'{deployment_name}_{solution_prefix}_{platform}_config')
 
   min_backoff = duration_pb2.Duration()
   min_backoff.seconds = data['queue_config']['retry_config']['min_backoff']
@@ -423,6 +424,27 @@ def _get_queue_config(client: tasks_v2.CloudTasksClient,
   }
 
   return queue_config
+
+def _read_platform_config_from_secret(project_id: str, secret_id: str) -> Dict[str, Any]:
+  """Gets the config for the platform.
+
+  Args:
+      project_id: the project name where the secret is defined
+      secret_id: the string representing the id to address the secret with the config
+
+  Returns:
+      A dictionary containing the conifguration
+  """
+  # Create the Secret Manager client.
+  client = secretmanager.SecretManagerServiceClient()
+  # Build the resource name of the secret version.
+  name = f'projects/{project_id}/secrets/{secret_id}/versions/latest'
+  # Access the secret version.
+  response = client.access_secret_version(request={'name': name})
+  payload = response.payload.data.decode('UTF-8')
+  data = json.loads(payload)
+
+  return data
 
 def file_slicer(data, context=Optional[Context]):
   """Background Cloud Function to be triggered by Cloud Storage.
@@ -462,7 +484,12 @@ def file_slicer(data, context=Optional[Context]):
     try:
 
       target_platform = _get_target_platform(os.path.basename(file_name))
-      queue_config = _get_queue_config(client, project, location, target_platform)
+      queue_config = _get_queue_config(client,
+                                       project,
+                                       deployment_name,
+                                       solution_prefix,
+                                       location,
+                                       target_platform)
       
       invoker_url = _get_invoker_url(target_platform,
                      location,

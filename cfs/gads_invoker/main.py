@@ -33,6 +33,7 @@ from google.ads.google_ads.client import GoogleAdsClient
 from google.ads.google_ads.errors import GoogleAdsException
 from google.cloud import pubsub_v1
 from google.cloud import storage
+from google.cloud import secretmanager
 
 
 def _get_conversion_action_resources(client: GoogleAdsClient,
@@ -332,30 +333,33 @@ def _gads_invoker_worker(client: GoogleAdsClient, bucket_name: str,
   return result
 
 
-def _initialize_gads_client(login_customer_id: str) -> GoogleAdsClient:
+def _initialize_gads_client(config: Dict[str, Any], login_customer_id: str) -> GoogleAdsClient:
   """Initialized and returns Google Ads API client.
 
   Args:
+    config: a dictionary with the platform configuration
     login_customer_id: the customer id to act as
 
   Returns:
     GoogleAdsClient
   """
 
-  with open('gads_config.json') as json_file:
-    data = json.load(json_file)
-
-  if login_customer_id in data["credentials"]:
-    client = GoogleAdsClient.load_from_dict(data["credentials"][login_customer_id])
+  if login_customer_id in config["credentials"]:
+    client = GoogleAdsClient.load_from_dict(config["credentials"][login_customer_id])
     return client
   else:
     raise Exception(f'Credentias for {login_customer_id} not found')
 
-def _get_max_attempts() -> int:
+def _get_max_attempts(config: Dict[str, Any]) -> int:
+  """Retrieves the max attempts from the config.
 
-   with open('gads_config.json') as json_file:
-    data = json.load(json_file)
-    return data['queue_config']['retry_config']['max_attempts']
+  Args:
+    config: a dictionary with the platform configuration
+
+  Returns:
+    The number of attempts
+  """
+  return config['queue_config']['retry_config']['max_attempts']
 
 
 
@@ -385,6 +389,27 @@ def _extract_cids(input_json: Dict[str, Any]) -> (str, str, str):
                                                   ''), arr[4].replace('-', ''))
 
 
+def _read_platform_config_from_secret(project_id: str, secret_id: str) -> Dict[str, Any]:
+  """Gets the config for the platform.
+
+  Args:
+      project_id: the project name where the secret is defined
+      secret_id: the string representing the id to address the secret with the config
+
+  Returns:
+      A dictionary containing the conifguration
+  """
+  # Create the Secret Manager client.
+  client = secretmanager.SecretManagerServiceClient()
+  # Build the resource name of the secret version.
+  name = f'projects/{project_id}/secrets/{secret_id}/versions/latest'
+  # Access the secret version.
+  response = client.access_secret_version(request={'name': name})
+  payload = response.payload.data.decode('UTF-8')
+  data = json.loads(payload)
+
+  return data
+
 def gads_invoker(request):
   """Triggers the upload of a chunk of conversions.
 
@@ -411,9 +436,11 @@ def gads_invoker(request):
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
-  max_attempts = _get_max_attempts()
+  config = _read_platform_config_from_secret(project_id,
+                                            f'{deployment_name}_{solution_prefix}_gads_config')
+  max_attempts = _get_max_attempts(config)
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
-
+  
   input_json = request.get_json(silent=True)
 
   task_retries = -1
@@ -422,8 +449,8 @@ def gads_invoker(request):
     print('Got {} task retries from Cloud Tasks'.format(task_retries))
   try:
     (_, login_cid, conversions_holder_cid) = _extract_cids(input_json)
-
-    client = _initialize_gads_client(login_cid)
+   
+    client = _initialize_gads_client(config, login_cid)
     conversions_resources = _get_conversion_action_resources(
         client, conversions_holder_cid)
     result = _gads_invoker_worker(client, bucket_name, input_json,
@@ -483,18 +510,21 @@ def main(argv: Sequence[str]) -> None:
   project_id = os.environ['DEFAULT_GCP_PROJECT']
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
+  config = _read_platform_config_from_secret(project_id,
+                                            f'{deployment_name}_{solution_prefix}_gads_config')
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
-  max_attempts = _get_max_attempts()
+  max_attempts = _get_max_attempts(config)
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
   task_retries = -1
 
   try:
     (_, login_cid, conversions_holder_cid) = _extract_cids(input_json)
 
-    client = _initialize_gads_client(login_cid)
+    client = _initialize_gads_client(config, login_cid)
+    
     conversions_resources = _get_conversion_action_resources(
         client, conversions_holder_cid)
-
+    
     result = _gads_invoker_worker(client, bucket_name, input_json,
                                   conversions_resources, project_id,
                                   full_path_topic, task_retries, max_attempts)
