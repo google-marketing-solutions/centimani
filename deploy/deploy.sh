@@ -27,16 +27,17 @@ function deploy_solution {
   gcloud config set project "$DEFAULT_GCP_PROJECT"
   gcloud config set compute/region "$DEFAULT_GCP_REGION"
 
-  #enable_services
+  enable_services
   echo "**************************************************************"
   echo "* Services Enabled. Waiting for changes to be applied...     *"
   echo "**************************************************************"
-  #sleep 30
-  #create_service_account
+  sleep 30
+  create_service_account
+  sleep 30
   echo "**************************************************************"
   echo "* Service Account Created.                                   *"
   echo "**************************************************************"
-  #set_service_account_permissions
+  set_service_account_permissions
   echo "**************************************************************"
   echo "* Account Permissions Set.                                   *"
   echo "**************************************************************"
@@ -96,6 +97,7 @@ function print_welcome_message {
 # Enable the necessary cloud services used
 function enable_services {
   gcloud services enable \
+    compute.googleapis.com \
     appengine.googleapis.com \
     cloudbuild.googleapis.com \
     pubsub.googleapis.com \
@@ -104,9 +106,7 @@ function enable_services {
     firestore.googleapis.com \
     servicemanagement.googleapis.com \
     servicecontrol.googleapis.com \
-    endpoints.googleapis.com \
     bigquery.googleapis.com \
-    bigquerydatatransfer.googleapis.com \
     cloudtasks.googleapis.com \
     secretmanager.googleapis.com \
     --format "none"
@@ -205,7 +205,7 @@ function set_service_account_permissions {
   --format "none"
   gcloud projects add-iam-policy-binding "$DEFAULT_GCP_PROJECT" \
   --member="serviceAccount:$SERVICE_ACCOUNT" \
-  --role=roles/automl.editor \
+  --role=roles/secretmanager.secretAccessor \
   --format "none"
 
 }

@@ -17,31 +17,33 @@
 
 # General settings
 # =====================================================================
-DEPLOYMENT_NAME: 'ego_cogito'
-SOLUTION_PREFIX: 'jaime_massive_uploader'
+DEPLOYMENT_NAME: 'deployment-name'
+SOLUTION_PREFIX: 'descriptive-prefix'
 # Service account for the deployment. It must be granted in all the GCP projects used
-SERVICE_ACCOUNT: 'hectorparra-test@appspot.gserviceaccount.com'
+SERVICE_ACCOUNT: 'sa-name-without-domain'
 # Project for pub/sub & firestore
-DEFAULT_GCP_PROJECT: 'hectorparra-test'
+DEFAULT_GCP_PROJECT: 'your-project'
 # Type gcloud compute regions list to find out the different values
-DEFAULT_GCP_REGION: 'europe-west1'
+DEFAULT_GCP_REGION: 'your-project-region'
 
 
 # GCS settings
 # =====================================================================
-DEFAULT_GCS_BUCKET: 'test_conversions_import'
-MAX_CHUNK_LINES: '2000'
+DEFAULT_GCS_BUCKET: 'the-bucket-name'
 
 # BQ settings
 # =====================================================================
 SKIP_DATASET_CREATION: 'N'
-BQ_REPORTING_DATASET: 'massive_conversions_reporting'
-BQ_REPORTING_TABLE: 'daily_results'
+BQ_REPORTING_DATASET: 'the-dataset-name'
+BQ_REPORTING_TABLE: 'the-table-name'
+# https://cloud.google.com/bigquery/docs/locations#multi-regional-locations
 BQ_GCP_BROAD_REGION: 'EU'
 
 # Polling & throttling settings
 # =====================================================================
+# Timezone values https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 TIMEZONE: 'Europe/Madrid'
+# Polling interval syntax https://cloud.google.com/scheduler/docs/configuring/cron-job-schedules
 REPORTING_DATA_POLLING_CONFIG: '\*/5 \* \* \* \*'
 
 

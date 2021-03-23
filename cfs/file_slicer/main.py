@@ -390,15 +390,14 @@ def _get_queue_config(client: tasks_v2.CloudTasksClient,
                       deployment_name: str,
                       solution_prefix: str,
                       location: str,
-                      platform: str) -> Dict[str, Any]:
-
-  data = _read_platform_config_from_secret(project,f'{deployment_name}_{solution_prefix}_{platform}_config')
+                      platform: str,
+                      config: Dict[str, Any]) -> Dict[str, Any]:
 
   min_backoff = duration_pb2.Duration()
-  min_backoff.seconds = data['queue_config']['retry_config']['min_backoff']
+  min_backoff.seconds = config['queue_config']['retry_config']['min_backoff']
 
   max_backoff = duration_pb2.Duration()
-  max_backoff.seconds = data['queue_config']['retry_config']['max_backoff']
+  max_backoff.seconds = config['queue_config']['retry_config']['max_backoff']
 
   # With the former values for min and max_backoff, plus 3 max_doublings,
   # retries happen after 10, 20, 40, 80, 160, 240, 300, 300, 300 and 300
@@ -406,20 +405,20 @@ def _get_queue_config(client: tasks_v2.CloudTasksClient,
 
   max_retry = duration_pb2.Duration()
   # Max retry = 10 + 20 + 40 + 8 + 160 + 240 + 300 + 300 + 300 + 300
-  max_retry.seconds = data['queue_config']['retry_config']['max_retry_duration']
+  max_retry.seconds = config['queue_config']['retry_config']['max_retry_duration']
 
   queue_config = {
-      'name': client.queue_path(project, location, data['queue_config']['name']),
+      'name': client.queue_path(project, location, config['queue_config']['name']),
       'rate_limits': {
-          'max_dispatches_per_second': data['queue_config']['rate_limits']['max_dispatches_per_second'],
-          'max_concurrent_dispatches': data['queue_config']['rate_limits']['max_concurrent_dispatches'],
+          'max_dispatches_per_second': config['queue_config']['rate_limits']['max_dispatches_per_second'],
+          'max_concurrent_dispatches': config['queue_config']['rate_limits']['max_concurrent_dispatches'],
       },
       'retry_config': {
-          'max_attempts': data['queue_config']['retry_config']['max_attempts'],
+          'max_attempts': config['queue_config']['retry_config']['max_attempts'],
           'max_retry_duration': max_retry,
           'min_backoff': min_backoff,
           'max_backoff': max_backoff,
-          'max_doublings': data['queue_config']['retry_config']['max_doublings'],
+          'max_doublings': config['queue_config']['retry_config']['max_doublings'],
       }
   }
 
@@ -463,7 +462,7 @@ def file_slicer(data, context=Optional[Context]):
   file_name = data['name']
   bucket = data['bucket']
   if not all(elem in os.environ for elem in [
-      'MAX_CHUNK_LINES', 'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
+      'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
       'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'SERVICE_ACCOUNT'
   ]):
     print('Cannot proceed, there are missing input values, '
@@ -473,7 +472,7 @@ def file_slicer(data, context=Optional[Context]):
     # Create a client.
     client = tasks_v2.CloudTasksClient()
     print('Processing file %s' % file_name)
-    max_chunk_lines = int(os.environ['MAX_CHUNK_LINES'])
+    
     project = os.environ['DEFAULT_GCP_PROJECT']
     location = os.environ['DEFAULT_GCP_REGION']
     deployment_name = os.environ['DEPLOYMENT_NAME']
@@ -484,12 +483,17 @@ def file_slicer(data, context=Optional[Context]):
     try:
 
       target_platform = _get_target_platform(os.path.basename(file_name))
+      config = _read_platform_config_from_secret(project,
+                    f'{deployment_name}_{solution_prefix}_{target_platform}_config')
+      max_chunk_lines = config['slicer']['max_chunk_lines']
+      print(max_chunk_lines)
       queue_config = _get_queue_config(client,
                                        project,
                                        deployment_name,
                                        solution_prefix,
                                        location,
-                                       target_platform)
+                                       target_platform,
+                                       config)
       
       invoker_url = _get_invoker_url(target_platform,
                      location,
