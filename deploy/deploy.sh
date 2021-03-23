@@ -22,7 +22,7 @@ FUNCTIONS_DIR="../cfs"
 source "$ENV_PATH"
 
 function deploy_solution {
-  
+
   print_welcome_message
   gcloud config set project "$DEFAULT_GCP_PROJECT"
   gcloud config set compute/region "$DEFAULT_GCP_REGION"
@@ -39,6 +39,10 @@ function deploy_solution {
   #set_service_account_permissions
   echo "**************************************************************"
   echo "* Account Permissions Set.                                   *"
+  echo "**************************************************************"
+  create_secrets
+  echo "**************************************************************"
+  echo "* Secrets Created.                                            *"
   echo "**************************************************************"
   deploy_cloud_functions
   echo "**************************************************************"
@@ -57,16 +61,16 @@ function deploy_solution {
   echo "**************************************************************"
   print_completion_message
 }
-# Prints the pLTV ASCII-art logo
+# Prints the ASCII-art logo
 function print_logo {
   echo "
-  ███╗   ███╗ █████╗ ███████╗███████╗██╗██╗   ██╗███████╗                               
-  ████╗ ████║██╔══██╗██╔════╝██╔════╝██║██║   ██║██╔════╝                               
-  ██╔████╔██║███████║███████╗███████╗██║██║   ██║█████╗                                 
-  ██║╚██╔╝██║██╔══██║╚════██║╚════██║██║╚██╗ ██╔╝██╔══╝                                 
-  ██║ ╚═╝ ██║██║  ██║███████║███████║██║ ╚████╔╝ ███████╗                               
-  ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═══╝  ╚══════╝                               
-                                                                                        
+  ███╗   ███╗ █████╗ ███████╗███████╗██╗██╗   ██╗███████╗
+  ████╗ ████║██╔══██╗██╔════╝██╔════╝██║██║   ██║██╔════╝
+  ██╔████╔██║███████║███████╗███████╗██║██║   ██║█████╗
+  ██║╚██╔╝██║██╔══██║╚════██║╚════██║██║╚██╗ ██╔╝██╔══╝
+  ██║ ╚═╝ ██║██║  ██║███████║███████║██║ ╚████╔╝ ███████╗
+  ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═══╝  ╚══════╝
+
    ██████╗ ██████╗ ███╗   ██╗██╗   ██╗███████╗██████╗ ███████╗██╗ ██████╗ ███╗   ██╗███████╗
   ██╔════╝██╔═══██╗████╗  ██║██║   ██║██╔════╝██╔══██╗██╔════╝██║██╔═══██╗████╗  ██║██╔════╝
   ██║     ██║   ██║██╔██╗ ██║██║   ██║█████╗  ██████╔╝███████╗██║██║   ██║██╔██╗ ██║███████╗
@@ -74,13 +78,13 @@ function print_logo {
   ╚██████╗╚██████╔╝██║ ╚████║ ╚████╔╝ ███████╗██║  ██║███████║██║╚██████╔╝██║ ╚████║███████║
   ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
 
-  ██╗   ██╗██████╗ ██╗      ██████╗  █████╗ ██████╗ ███████╗██████╗                     
-  ██║   ██║██╔══██╗██║     ██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗                    
-  ██║   ██║██████╔╝██║     ██║   ██║███████║██║  ██║█████╗  ██████╔╝                    
-  ██║   ██║██╔═══╝ ██║     ██║   ██║██╔══██║██║  ██║██╔══╝  ██╔══██╗                    
-  ╚██████╔╝██║     ███████╗╚██████╔╝██║  ██║██████╔╝███████╗██║  ██║                    
-   ╚═════╝ ╚═╝     ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝                    
- 
+  ██╗   ██╗██████╗ ██╗      ██████╗  █████╗ ██████╗ ███████╗██████╗
+  ██║   ██║██╔══██╗██║     ██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗
+  ██║   ██║██████╔╝██║     ██║   ██║███████║██║  ██║█████╗  ██████╔╝
+  ██║   ██║██╔═══╝ ██║     ██║   ██║██╔══██║██║  ██║██╔══╝  ██╔══██╗
+  ╚██████╔╝██║     ███████╗╚██████╔╝██║  ██║██████╔╝███████╗██║  ██║
+   ╚═════╝ ╚═╝     ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝
+
   "
 
 }
@@ -89,7 +93,7 @@ function print_welcome_message {
   print_logo
 }
 
-# Enable the necessary cloud services used in pLTV_scaffolding
+# Enable the necessary cloud services used
 function enable_services {
   gcloud services enable \
     appengine.googleapis.com \
@@ -104,7 +108,24 @@ function enable_services {
     bigquery.googleapis.com \
     bigquerydatatransfer.googleapis.com \
     cloudtasks.googleapis.com \
+    secretmanager.googleapis.com \
     --format "none"
+}
+
+function create_secrets {
+  FILES=*_config.json
+  for f in $FILES
+  do
+     echo "Creating secrets for config file $f..."
+     TMP_PLATFORM=$(echo $f | cut -d "_" -f 1)
+     SECRET_ID="${DEPLOYMENT_NAME}_${SOLUTION_PREFIX}_${TMP_PLATFORM}_config"
+     gcloud secrets create $SECRET_ID \
+       --replication-policy=user-managed \
+       --locations=${DEFAULT_GCP_REGION} \
+       --verbosity=none
+
+     gcloud secrets versions add $SECRET_ID --data-file="${f}"
+  done
 }
 
 # Loop through the CF directories and deploy the Cloud Functions
@@ -129,7 +150,8 @@ function create_schedulers {
     --topic "$OUTBOUND_TOPIC_NAME" \
     --time-zone "${TIMEZONE//\\/}" \
     --message-body "It's Reporting Time!" \
-    --format "none"
+    --format "none" \
+    --verbosity=none
     )
 
     echo "$SC1"
@@ -160,8 +182,8 @@ function create_service_account {
     CLEAN_SERVICE_ACCOUNT=$(echo "$SERVICE_ACCOUNT" | sed 's/@.*//')
     echo "$CLEAN_SERVICE_ACCOUNT"
     RESULT_CREATE_SERVICE_ACCOUNT=$(gcloud iam service-accounts create "$CLEAN_SERVICE_ACCOUNT" \
-      --description "Service Account for pLTV processing" \
-      --display-name "pLTV Service Account" \
+      --description "Service Account" \
+      --display-name "Service Account" \
       --format="value(email)")
     echo "$RESULT_CREATE_SERVICE_ACCOUNT"
   fi
@@ -213,12 +235,11 @@ function create_bq_dataset {
   fi
 }
 
-# Print the completion message once pLTV has been deployed.
+# Print the completion message once all components have been deployed.
 function print_completion_message {
   echo "
 <><><><><><><><><><><><><><><><><><><>
 "
-  print_pltv_scaffolding_logo
   echo "$DEPLOY_NAME.$SOLUTION_NAME Massive Conversions Uploader has now been deployed.
 Please check the logs for any errors. If there are none, you're all set up!
 "
