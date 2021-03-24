@@ -38,6 +38,7 @@ gcloud functions deploy "$DEPLOYMENT_NAME""_""$SOLUTION_PREFIX""_""$CF_NAME""" \
   --service-account "$SERVICE_ACCOUNT" \
   --env-vars-file ./__config.yaml \
   --no-allow-unauthenticated \
+  --timeout "$TIMEOUT" \
   --format "none"
 
 rm ./__config.yaml

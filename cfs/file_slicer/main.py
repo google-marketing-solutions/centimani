@@ -43,7 +43,7 @@ def _get_file_parameters(csv_line: str) -> Dict[str, Any]:
     return csv_line
   else:
     return []
-  
+
 
 def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
                                                                         Any]):
@@ -236,19 +236,19 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
 
   # Init Cloud Task Queue
   queue = _upsert_queue(client, queue_config)
-  
+
   # Move file to processing folder
   now = datetime.datetime.now()
   processing_date = now.strftime('%Y%m%d')
   parent_filename = os.path.basename(file_name)
   parent_filepath = os.path.dirname(file_name)
 
-  # Extract the CID from the filename. Structure is 
+  # Extract the CID from the filename. Structure is
   #     <platform>_<free-text-without-underscore>_<cid>_<login-cid>_<conv-definition-cid>_<YYYYMMDD>*.csv
-  
+
   parent_cid, parent_date = _extract_info_from_filename(parent_filename)
 
-  new_file_name = f'{processing_date}/processing/{parent_filename}'
+  new_file_name = f'{processing_date}/processed/{parent_filename}'
   _mv_blob(bucket_name, file_name, bucket_name, new_file_name)
 
   # Load file in memory, read line by line and create chunks of a specific size
@@ -259,9 +259,6 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
   parent_numrows = sum(1 for row in conversions_list) -1
   # print('Parent_numrows is {}'.format(parent_numrows))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
-  
-  parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
-  # print('parent_numchunks is {}'.format(parent_numchunks))
 
   num_rows = 0
   num_chunks = 0
@@ -269,27 +266,27 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
   extra_params = []
   header = []
   chunk_lines = 0
-   
+
   for conversion_info in conversions_list:
     num_rows = num_rows + 1
-       
+
 
     if num_rows > 2:
       chunk_buffer.append(conversion_info)
       chunk_lines += 1
     else:
       if num_rows == 1:
-        extra_params = _get_file_parameters(conversion_info)  
+        extra_params = _get_file_parameters(conversion_info)
         # No parameters line, first row is the header
         if len(extra_params) == 0:
-          header = conversion_info   
+          header = conversion_info
         else:
-          parent_numrows = parent_numrows -1             
+          parent_numrows = parent_numrows -1
       else:
         if num_rows == 2:
           # If parameters line, was present, second row is header
           if len(extra_params) > 0:
-            header = conversion_info   
+            header = conversion_info
           else: # else it's a conversion line
             chunk_buffer.append(conversion_info)
             chunk_lines += 1
@@ -303,6 +300,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
       child_numrows = len(chunk_buffer)
       chunk_buffer.insert(0, header)
       _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
+      parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
       _create_new_task(client, queue, project, location, queue_config,
                        parent_cid, parent_filename, parent_filepath,
                        parent_numchunks, parent_numrows, child_filename,
@@ -346,7 +344,7 @@ def _extract_info_from_filename(filename: str) -> (str, str):
   if len(arr) < 6:
     raise Exception('File name format is not correct')
 
-  return (arr[2].replace('-', ''), 
+  return (arr[2].replace('-', ''),
           arr[5].replace('-', '')
           )
 
@@ -369,7 +367,7 @@ def _get_invoker_url(platform: str,
                      project: str,
                      deployment_name: str,
                      solution_prefix: str) -> str:
-  
+
   """Returns the url to invoke the cloud function for the specific platform.
 
   Args:
@@ -472,13 +470,13 @@ def file_slicer(data, context=Optional[Context]):
     # Create a client.
     client = tasks_v2.CloudTasksClient()
     print('Processing file %s' % file_name)
-    
+
     project = os.environ['DEFAULT_GCP_PROJECT']
     location = os.environ['DEFAULT_GCP_REGION']
     deployment_name = os.environ['DEPLOYMENT_NAME']
     solution_prefix = os.environ['SOLUTION_PREFIX']
     service_account = os.environ['SERVICE_ACCOUNT']
-    
+
 
     try:
 
@@ -486,7 +484,6 @@ def file_slicer(data, context=Optional[Context]):
       config = _read_platform_config_from_secret(project,
                     f'{deployment_name}_{solution_prefix}_{target_platform}_config')
       max_chunk_lines = config['slicer']['max_chunk_lines']
-      print(max_chunk_lines)
       queue_config = _get_queue_config(client,
                                        project,
                                        deployment_name,
@@ -494,7 +491,7 @@ def file_slicer(data, context=Optional[Context]):
                                        location,
                                        target_platform,
                                        config)
-      
+
       invoker_url = _get_invoker_url(target_platform,
                      location,
                      project,
@@ -506,13 +503,9 @@ def file_slicer(data, context=Optional[Context]):
       now = datetime.datetime.now()
       processing_date = now.strftime('%Y%m%d')
       file_name = os.path.basename(file_name)
-      file_name = f'{processing_date}/processing/{file_name}'
+      file_name = f'{processing_date}/processed/{file_name}'
       new_file_name = f'{processing_date}/failed/{file_name}'
       _mv_blob(bucket, file_name, bucket, new_file_name)
-      
-
-  else:
-    print('Bypassing file %s' % file_name)
 
 
 def main(argv: Sequence[str]) -> None:
@@ -529,7 +522,7 @@ def main(argv: Sequence[str]) -> None:
     "name": argv[1]
     }
   file_slicer(data=data)
- 
+
 
 if __name__ == '__main__':
   app.run(main)

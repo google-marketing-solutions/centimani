@@ -438,18 +438,17 @@ def gads_invoker(request):
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
   config = _read_platform_config_from_secret(project_id,
                                             f'{deployment_name}_{solution_prefix}_gads_config')
-  max_attempts = _get_max_attempts(config)
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
-  
   input_json = request.get_json(silent=True)
 
   task_retries = -1
-  if 'X-Cloudtasks-Taskretrycount' in request.headers:
-    task_retries = request.headers.get('X-Cloudtasks-Taskretrycount')
-    print('Got {} task retries from Cloud Tasks'.format(task_retries))
   try:
+    max_attempts = int(_get_max_attempts(config))
+    if 'X-Cloudtasks-Taskretrycount' in request.headers:
+      task_retries = int(request.headers.get('X-Cloudtasks-Taskretrycount'))
+      print('Got {} task retries from Cloud Tasks'.format(task_retries))
     (_, login_cid, conversions_holder_cid) = _extract_cids(input_json)
-   
+
     client = _initialize_gads_client(config, login_cid)
     conversions_resources = _get_conversion_action_resources(
         client, conversions_holder_cid)
@@ -521,10 +520,10 @@ def main(argv: Sequence[str]) -> None:
     (_, login_cid, conversions_holder_cid) = _extract_cids(input_json)
 
     client = _initialize_gads_client(config, login_cid)
-    
+
     conversions_resources = _get_conversion_action_resources(
         client, conversions_holder_cid)
-    
+
     result = _gads_invoker_worker(client, bucket_name, input_json,
                                   conversions_resources, project_id,
                                   full_path_topic, task_retries, max_attempts)
