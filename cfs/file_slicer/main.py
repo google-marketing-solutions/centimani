@@ -27,8 +27,8 @@ import os
 import random
 import string
 import sys
-
-
+import hashlib
+  
 from typing import Any, Dict, Sequence, Optional
 from absl import app
 from google.cloud import storage
@@ -100,9 +100,15 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
   Returns:
       None
   """
-
+  task_id = f'{os.path.basename(child_filename)}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}'
+  task_id = hashlib.md5(task_id.encode('utf-8')).hexdigest()
+  task_name = client.task_path(project,
+                               location,
+                               queue.name.split('/')[-1],
+                               task_id)
   # Construct the request body.
   task = {
+      'name': task_name,
       'http_request': {  # Specify the type of request.
           'http_method': tasks_v2.HttpMethod.POST,
           'url': url,  # The full url path that the task will be sent to.
@@ -111,7 +117,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
           },
       }
   }
-
+  
   payload_json = {
       'date': processing_date,
       'target_platform': target_platform,
@@ -236,30 +242,25 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
 
   # Init Cloud Task Queue
   queue = _upsert_queue(client, queue_config)
-
   # Move file to processing folder
   now = datetime.datetime.now()
   processing_date = now.strftime('%Y%m%d')
   parent_filename = os.path.basename(file_name)
   parent_filepath = os.path.dirname(file_name)
-
   # Extract the CID from the filename. Structure is
   #     <platform>_<free-text-without-underscore>_<cid>_<login-cid>_<conv-definition-cid>_<YYYYMMDD>*.csv
 
   parent_cid, parent_date = _extract_info_from_filename(parent_filename)
 
-  new_file_name = f'{processing_date}/processed/{parent_filename}'
-  _mv_blob(bucket_name, file_name, bucket_name, new_file_name)
-
   # Load file in memory, read line by line and create chunks of a specific size
-  conversions_blob = _read_csv_from_blob(bucket_name, new_file_name)
+  conversions_blob = _read_csv_from_blob(bucket_name, file_name)
   # print('Conversions blob: {}'.format(conversions_blob))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
   # print('Conversions list: {}'.format(conversions_list))
   parent_numrows = sum(1 for row in conversions_list) -1
   # print('Parent_numrows is {}'.format(parent_numrows))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
-
+  
   num_rows = 0
   num_chunks = 0
   chunk_buffer = []
@@ -324,6 +325,8 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
   print('Wrote %s chunks for %s' %
         (format(num_chunks), format(parent_filename)))
 
+  new_file_name = f'{processing_date}/processed/{parent_filename}'
+  _mv_blob(bucket_name, file_name, bucket_name, new_file_name)
 
 def _extract_info_from_filename(filename: str) -> (str, str):
   """Extracts the parent cid and date from file name
@@ -477,12 +480,14 @@ def file_slicer(data, context=Optional[Context]):
     solution_prefix = os.environ['SOLUTION_PREFIX']
     service_account = os.environ['SERVICE_ACCOUNT']
 
-
+    
     try:
 
       target_platform = _get_target_platform(os.path.basename(file_name))
+      
       config = _read_platform_config_from_secret(project,
                     f'{deployment_name}_{solution_prefix}_{target_platform}_config')
+      
       max_chunk_lines = config['slicer']['max_chunk_lines']
       queue_config = _get_queue_config(client,
                                        project,
@@ -491,7 +496,6 @@ def file_slicer(data, context=Optional[Context]):
                                        location,
                                        target_platform,
                                        config)
-
       invoker_url = _get_invoker_url(target_platform,
                      location,
                      project,
@@ -503,9 +507,9 @@ def file_slicer(data, context=Optional[Context]):
       now = datetime.datetime.now()
       processing_date = now.strftime('%Y%m%d')
       file_name = os.path.basename(file_name)
-      file_name = f'{processing_date}/processed/{file_name}'
-      new_file_name = f'{processing_date}/failed/{file_name}'
-      _mv_blob(bucket, file_name, bucket, new_file_name)
+      source_file_name = f'input/{file_name}'
+      target_file_name = f'{processing_date}/failed/{file_name}'
+      _mv_blob(bucket, source_file_name, bucket, target_file_name)
 
 
 def main(argv: Sequence[str]) -> None:
