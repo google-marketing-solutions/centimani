@@ -243,8 +243,7 @@ def _upload_conversions(input_json: Dict[str, Any],
                                             'slices_processed/')
     _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
     return 200
-  except GoogleAdsException as ex:
-    # _print_errors(ex)
+  except GoogleAdsException:
     pubsub_payload = _add_errors_to_input_data(input_json,
                                                input_json['child']['num_rows'])
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
@@ -285,6 +284,39 @@ def _send_pubsub_message(project_id, reporting_topic, pubsub_payload):
       topic_path_reporting, data=bytes(json.dumps(pubsub_payload),
                                        'utf-8')).result()
 
+def _blob_exists(bucket_name, blob_name):
+  """Checks if a blob exists in Google Cloud Storage.
+
+  Args:
+    bucket_name: Name of the bucket to read the blob from
+    blob_name: Name of the blob to check
+  Returns:
+    Boolean indicating if the blob exists or not
+  """
+
+  storage_client = storage.Client()
+  bucket = storage_client.bucket(bucket_name)
+  return storage.Blob(bucket=bucket, name=blob_name).exists(storage_client)
+
+def _check_conversions_blob(datestamp, bucket_name, chunk_filename):
+  """Checks if a blob exists either in the processing or processed directories.
+
+  Args:
+    datestamp: timestamp used to build the directory name
+    bucket_name: Name of the bucket to read the blob from
+    chunk_filename: Name of the chunk to check
+  Returns:
+    Full path to the blob or None if it cannot be found
+  """
+  processing_chunk_name = datestamp + '/slices_processing/' + chunk_filename
+  if _blob_exists(bucket_name, processing_chunk_name):
+    return processing_chunk_name
+  else:
+    processed_chunk_name = datestamp + '/slices_processed/' + chunk_filename
+    if _blob_exists(bucket_name, processed_chunk_name):
+      return processed_chunk_name
+    else:
+      return None
 
 def _gads_invoker_worker(client: GoogleAdsClient, bucket_name: str,
                          input_json: Dict[str, Any],
@@ -312,25 +344,29 @@ def _gads_invoker_worker(client: GoogleAdsClient, bucket_name: str,
   chunk_filename = input_json['child']['file_name']
   # Load filename from GCS
   # Load chunk file
-  full_chunk_name = datestamp + '/slices_processing/' + chunk_filename
-  conversions_blob = _read_csv_from_blob(bucket_name, full_chunk_name)
-  conversions_list = csv.reader(io.StringIO(conversions_blob))
-  # Skip header line
-  next(conversions_list)
-  result = _upload_conversions(
-      input_json,
-      conversion_actions_resources,
-      project_id,
-      reporting_topic,
-      client,
-      customer_id,
-      conversions_list,
-      task_retries,
-      max_attempts,
-      bucket_name,
-      full_chunk_name,
-  )
-  return result
+  full_chunk_name = _check_conversions_blob(datestamp, bucket_name,
+                                            chunk_filename)
+  if full_chunk_name:
+    conversions_blob = _read_csv_from_blob(bucket_name, full_chunk_name)
+    conversions_list = csv.reader(io.StringIO(conversions_blob))
+    # Skip header line
+    next(conversions_list)
+    result = _upload_conversions(
+        input_json,
+        conversion_actions_resources,
+        project_id,
+        reporting_topic,
+        client,
+        customer_id,
+        conversions_list,
+        task_retries,
+        max_attempts,
+        bucket_name,
+        full_chunk_name,
+    )
+    return result
+  else:
+    return 200
 
 
 def _initialize_gads_client(config: Dict[str, Any], login_customer_id: str) -> GoogleAdsClient:
