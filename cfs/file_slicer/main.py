@@ -28,7 +28,7 @@ import random
 import string
 import sys
 import hashlib
-  
+
 from typing import Any, Dict, Sequence, Optional
 from absl import app
 from google.cloud import storage
@@ -117,7 +117,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
           },
       }
   }
-  
+
   payload_json = {
       'date': processing_date,
       'target_platform': target_platform,
@@ -260,13 +260,14 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
   parent_numrows = sum(1 for row in conversions_list) -1
   # print('Parent_numrows is {}'.format(parent_numrows))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
-  
+
   num_rows = 0
   num_chunks = 0
   chunk_buffer = []
   extra_params = []
   header = []
   chunk_lines = 0
+  parent_numchunks = None
 
   for conversion_info in conversions_list:
     num_rows = num_rows + 1
@@ -275,6 +276,8 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
     if num_rows > 2:
       chunk_buffer.append(conversion_info)
       chunk_lines += 1
+      if not parent_numchunks:
+        parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
     else:
       if num_rows == 1:
         extra_params = _get_file_parameters(conversion_info)
@@ -301,7 +304,6 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
       child_numrows = len(chunk_buffer)
       chunk_buffer.insert(0, header)
       _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
-      parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
       _create_new_task(client, queue, project, location, queue_config,
                        parent_cid, parent_filename, parent_filepath,
                        parent_numchunks, parent_numrows, child_filename,
@@ -480,14 +482,14 @@ def file_slicer(data, context=Optional[Context]):
     solution_prefix = os.environ['SOLUTION_PREFIX']
     service_account = os.environ['SERVICE_ACCOUNT']
 
-    
+
     try:
 
       target_platform = _get_target_platform(os.path.basename(file_name))
-      
+
       config = _read_platform_config_from_secret(project,
                     f'{deployment_name}_{solution_prefix}_{target_platform}_config')
-      
+
       max_chunk_lines = config['slicer']['max_chunk_lines']
       queue_config = _get_queue_config(client,
                                        project,
@@ -503,14 +505,14 @@ def file_slicer(data, context=Optional[Context]):
                      solution_prefix)
       _file_slicer_worker(client, file_name, bucket, max_chunk_lines, project, location,
                           queue_config, invoker_url, service_account, target_platform)
-    except Exception as e:
+    except Exception:
       now = datetime.datetime.now()
       processing_date = now.strftime('%Y%m%d')
       file_name = os.path.basename(file_name)
       source_file_name = f'input/{file_name}'
       target_file_name = f'{processing_date}/failed/{file_name}'
       _mv_blob(bucket, source_file_name, bucket, target_file_name)
-
+      raise
 
 def main(argv: Sequence[str]) -> None:
   """Main function for testing using the command line.
