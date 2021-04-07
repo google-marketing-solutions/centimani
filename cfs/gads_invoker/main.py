@@ -20,20 +20,19 @@ import csv
 import datetime
 import io
 import json
-import os
-import pytz
-import sys
 import logging
-
-from typing import Any, Dict, Sequence
+import os
+import sys
+from typing import Any, Dict, Sequence, Optional
 
 from absl import app
 from flask import Response
-from google.ads.google_ads.client import GoogleAdsClient
-from google.ads.google_ads.errors import GoogleAdsException
+from google.ads.googleads.client import GoogleAdsClient
+from google.ads.googleads.errors import GoogleAdsException
 from google.cloud import pubsub_v1
-from google.cloud import storage
 from google.cloud import secretmanager
+from google.cloud import storage
+import pytz
 
 
 def _get_conversion_action_resources(client: GoogleAdsClient,
@@ -48,14 +47,14 @@ def _get_conversion_action_resources(client: GoogleAdsClient,
       A boolean, whether or not the response message has a partial
       failure error.
   """
-  ga_service = client.get_service('GoogleAdsService', version='v6')
+  ga_service = client.get_service('GoogleAdsService')
   print('Extracting conversion information from customer ID {}'.format(
       customer_id))
   dict_result = {}
   query = """
       SELECT conversion_action.id, conversion_action.name FROM conversion_action
       """
-  response = ga_service.search_stream(customer_id, query)
+  response = ga_service.search_stream(customer_id=customer_id, query=query)
   for batch in response:
     for row in batch.results:
       dict_result[
@@ -101,10 +100,15 @@ def _count_partial_errors(client: GoogleAdsClient,
     error_details = getattr(partial_failure, 'details', [])
 
     for error_detail in error_details:
-      failure_message = client.get_type('GoogleAdsFailure', version='v6')
-      failure_object = failure_message.FromString(error_detail.value)
-      error_count += len(failure_object.errors)
-
+      failure_message = client.get_type('GoogleAdsFailure')
+      google_ads_failure = type(failure_message)
+      failure_object_des = google_ads_failure.deserialize(error_detail.value)
+      error_count += len(failure_object_des.errors)
+      for error in failure_object_des.errors:
+        print('A partial failure at index '
+              f'{error.location.field_path_elements[0].index} occurred '
+              f'\nError message: {error.message}\nError code: '
+              f'{error.error_code}')
   return error_count
 
 
@@ -230,11 +234,21 @@ def _upload_conversions(input_json: Dict[str, Any],
 
   try:
     conversion_upload_service = client.get_service(
-        'ConversionUploadService', version='v6')
+        'ConversionUploadService')
     # Upload the conversions using the API and handle any possible errors
-    print(f'Proceeding to upload conversions for customer_id {customer_id}')
-    conversion_upload_response = conversion_upload_service.upload_click_conversions(
-        customer_id, conversions_list, partial_failure=True)
+    num_conversions = len(conversions_list)
+    print(
+        f'Proceeding to upload {num_conversions} conversions for customer_id {customer_id}'
+    )
+    request = client.get_type('UploadClickConversionsRequest')
+    request.customer_id = customer_id
+    request.conversions = conversions_list
+    request.partial_failure = True
+    conversion_upload_response = (
+        conversion_upload_service.upload_click_conversions(
+            request=request,
+        )
+    )
     pubsub_payload = _add_errors_to_input_data(
         input_json, _count_partial_errors(client, conversion_upload_response))
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
@@ -253,11 +267,10 @@ def _upload_conversions(input_json: Dict[str, Any],
                                               'slices_failed/')
       _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
     return 500
-  except:
+  except Exception:
     print('Unexpected error:', sys.exc_info()[0])
     pubsub_payload = _add_errors_to_input_data(input_json,
                                                input_json['child']['num_rows'])
-
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
     # If last try, move blob to /slices_failed
     if task_retries + 1 == max_attempts:
@@ -284,6 +297,7 @@ def _send_pubsub_message(project_id, reporting_topic, pubsub_payload):
       topic_path_reporting, data=bytes(json.dumps(pubsub_payload),
                                        'utf-8')).result()
 
+
 def _blob_exists(bucket_name, blob_name):
   """Checks if a blob exists in Google Cloud Storage.
 
@@ -298,6 +312,7 @@ def _blob_exists(bucket_name, blob_name):
   bucket = storage_client.bucket(bucket_name)
   return storage.Blob(bucket=bucket, name=blob_name).exists(storage_client)
 
+
 def _check_conversions_blob(datestamp, bucket_name, chunk_filename):
   """Checks if a blob exists either in the processing or processed directories.
 
@@ -310,13 +325,18 @@ def _check_conversions_blob(datestamp, bucket_name, chunk_filename):
   """
   processing_chunk_name = datestamp + '/slices_processing/' + chunk_filename
   if _blob_exists(bucket_name, processing_chunk_name):
+    print('Found conversions blob in slices_processing folder')
     return processing_chunk_name
   else:
     processed_chunk_name = datestamp + '/slices_processed/' + chunk_filename
+    print('Looking for {}'.format(processing_chunk_name))
     if _blob_exists(bucket_name, processed_chunk_name):
+      print('Found conversions blob in slices_processed folder')
       return processed_chunk_name
     else:
+      print('ERROR: Blob not found')
       return None
+
 
 def _gads_invoker_worker(client: GoogleAdsClient, bucket_name: str,
                          input_json: Dict[str, Any],
@@ -366,6 +386,8 @@ def _gads_invoker_worker(client: GoogleAdsClient, bucket_name: str,
     )
     return result
   else:
+    input_json['child']['num_errors'] = input_json['child']['num_rows']
+    _send_pubsub_message(project_id, reporting_topic, input_json)
     return 200
 
 
@@ -378,13 +400,19 @@ def _initialize_gads_client(config: Dict[str, Any], login_customer_id: str) -> G
 
   Returns:
     GoogleAdsClient
+  Raises:
+    Exception: Credentials for login_customer_id not found.
   """
-
-  if login_customer_id in config["credentials"]:
+  logging.basicConfig(
+      level=logging.WARNING,
+      format='[%(asctime)s - %(levelname)s] %(message).5000s')
+  logging.getLogger('google.ads.googleads.client').setLevel(logging.WARNING)
+  if login_customer_id in config['credentials']:
     client = GoogleAdsClient.load_from_dict(config["credentials"][login_customer_id])
     return client
   else:
-    raise Exception(f'Credentias for {login_customer_id} not found')
+    raise Exception(f'Credentials for {login_customer_id} not found')
+
 
 def _get_max_attempts(config: Dict[str, Any]) -> int:
   """Retrieves the max attempts from the config.
@@ -396,7 +424,6 @@ def _get_max_attempts(config: Dict[str, Any]) -> int:
     The number of attempts
   """
   return config['queue_config']['retry_config']['max_attempts']
-
 
 
 def _extract_cids(input_json: Dict[str, Any]) -> (str, str, str):
@@ -414,7 +441,8 @@ def _extract_cids(input_json: Dict[str, Any]) -> (str, str, str):
         The cid of the customer to login as.<login-cid>
         The cid of the account where the conversions are
         defined.<conv-definiton-cid>
-
+  Raises:
+    Exception: File name format is not correct.
   """
   arr = input_json['parent']['file_name'].split('_')
 
@@ -425,12 +453,13 @@ def _extract_cids(input_json: Dict[str, Any]) -> (str, str, str):
                                                   ''), arr[4].replace('-', ''))
 
 
-def _read_platform_config_from_secret(project_id: str, secret_id: str) -> Dict[str, Any]:
+def _read_platform_config_from_secret(project_id: str,
+                                      secret_id: str) -> Dict[str, Any]:
   """Gets the config for the platform.
 
   Args:
       project_id: the project name where the secret is defined
-      secret_id: the string representing the id to address the secret with the config
+      secret_id: string representing the id of the secret with the config
 
   Returns:
       A dictionary containing the conifguration
@@ -445,6 +474,7 @@ def _read_platform_config_from_secret(project_id: str, secret_id: str) -> Dict[s
   data = json.loads(payload)
 
   return data
+
 
 def gads_invoker(request):
   """Triggers the upload of a chunk of conversions.
@@ -473,7 +503,7 @@ def gads_invoker(request):
   solution_prefix = os.environ['SOLUTION_PREFIX']
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
   config = _read_platform_config_from_secret(project_id,
-                                            f'{deployment_name}_{solution_prefix}_gads_config')
+                                             f'{deployment_name}_{solution_prefix}_gads_config')
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
   input_json = request.get_json(silent=True)
 
@@ -506,7 +536,8 @@ def gads_invoker(request):
     _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
     return Response('', 200)
 
-def main(argv: Sequence[str]) -> None:
+
+def main(argv: Optional[Sequence[str]]) -> None:
   """Main function for testing using the command line.
 
   Args:
@@ -515,22 +546,18 @@ def main(argv: Sequence[str]) -> None:
   Returns:
       None
   """
-  # Replace with your testing JSON
-
-  logging.basicConfig(level=logging.INFO, format='[%(asctime)s - %(levelname)s] %(message).5000s')
-  logging.getLogger('google.ads.google_ads.client').setLevel(logging.WARNING)
-
-  input_string = (' {"date": "20210322", '
+    # Replace with your testing JSON
+  input_string = (' {"date": "20210406", '
     '"target_platform": "gads",'
     '"extra_parameters": ["Parameters:TimeZone=Europe/Madrid", "", "", "", ""],'
-    '"parent": {"cid": "1147121970", "file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv",'
+    '"parent": {"cid": "6849178819", "file_name": "GADS_EGO_684-917-8819_876-730-8703_684-917-8819_20210406_4.csv",'
     '"file_path": "input",'
-    '"file_date": "20210322",'
-    '"total_files": 7,'
-    '"total_rows": 12326},'
-    '"child": {"file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv---1",'
-    '"num_rows": 2000}}'
-    )
+    '"file_date": "20210406",'
+    '"total_files": 100,'
+    '"total_rows": 25000},'
+    '"child": {"file_name": "GADS_EGO_684-917-8819_876-730-8703_684-917-8819_20210406_4.csv---24",'
+    '"num_rows": 250}}')
+
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
@@ -546,7 +573,7 @@ def main(argv: Sequence[str]) -> None:
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
   config = _read_platform_config_from_secret(project_id,
-                                            f'{deployment_name}_{solution_prefix}_gads_config')
+                                             f'{deployment_name}_{solution_prefix}_gads_config')
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
   max_attempts = _get_max_attempts(config)
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
@@ -559,7 +586,6 @@ def main(argv: Sequence[str]) -> None:
 
     conversions_resources = _get_conversion_action_resources(
         client, conversions_holder_cid)
-
     result = _gads_invoker_worker(client, bucket_name, input_json,
                                   conversions_resources, project_id,
                                   full_path_topic, task_retries, max_attempts)
