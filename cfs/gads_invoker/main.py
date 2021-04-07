@@ -213,7 +213,7 @@ def _upload_conversions(input_json: Dict[str, Any],
   # Create a list of click conversions to be uploaded
   conversions_list = []
   for conversion_info in conversions:
-    click_conversion = client.get_type('ClickConversion', version='v6')
+    click_conversion = client.get_type('ClickConversion')
     click_conversion.gclid = conversion_info[0]
     click_conversion.conversion_action = conversion_actions_resources[
         conversion_info[1]]
