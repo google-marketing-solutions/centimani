@@ -37,6 +37,38 @@ from google.api_core.exceptions import NotFound
 from google.cloud.functions_v1.context import Context
 from google.protobuf import duration_pb2
 from google.cloud import secretmanager
+from google.cloud import pubsub_v1
+
+
+def _send_pubsub_message(project_id, topic, pubsub_payload):
+  """Sends a message to the pubsub topoc.
+
+  Args:
+    project_id: the id of the project where the topic exists
+    topic: the name of the topic to send the message to
+    pubsub_payload: the json payload to send to the topic
+
+  """
+  publisher = pubsub_v1.PublisherClient()
+  topic_path_reporting = publisher.topic_path(project_id, topic)
+  publisher.publish(
+      topic_path_reporting, data=bytes(json.dumps(pubsub_payload),
+                                       'utf-8')).result()
+
+def _add_errors_to_input_data(data: Dict[str, Any],
+                              num_errors: int) -> Dict[str, Any]:
+  """Includes the error count to the input data.
+
+  Args:
+    data: the input data received in the trigger invocation
+    num_errors: the number of errors to add
+
+  Returns:
+    The input data enriched with the num errors
+  """
+  data['child']['num_errors'] = num_errors
+  return data
+
 
 def _get_file_parameters(csv_line: str) -> Dict[str, Any]:
   if 'Parameters' in csv_line[0]:
@@ -70,6 +102,47 @@ def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
     })
 
   return queue
+
+def _build_file_message(parent_cid,
+                     parent_filename, parent_filepath, parent_numchunks,
+                     parent_numrows, child_filename, child_numrows, parent_date,
+                     processing_date, extra_parameters, target_platform):
+  """Creates a JSON payload representing the file to preocess.
+
+  Args:
+    parent_cid (string): CID associated with the parent file.
+    parent_filename (string): file name of the parent file.
+    parent_filepath (string): file path for the parent file.
+    parent_numchunks (integer): number of child chunks created for the parent.
+    parent_numrows (integer): number of rows in the parent file.
+    child_filename (string): file name of the child file.
+    child_numrows (integer): number of rows in the child file.
+    parent_date (string): date when the file was created
+    processing_date (string): date when the file is being processed
+    extra_parameters: string array representing the extra parameters for the platform
+    target_platform: string representing the platform to send the task to
+
+  Returns:
+      JSON payload
+  """
+
+  return {
+      'date': processing_date,
+      'target_platform': target_platform,
+      'extra_parameters': extra_parameters,
+      'parent': {
+          'cid': parent_cid.replace('-', ''),
+          'file_name': parent_filename,
+          'file_path': parent_filepath,
+          'file_date': parent_date,
+          'total_files': parent_numchunks,
+          'total_rows': parent_numrows,
+      },
+      'child': {
+          'file_name': os.path.basename(child_filename),
+          'num_rows': child_numrows
+      }
+  }
 
 def _create_new_task(client, queue, project, location, queue_name, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
@@ -118,24 +191,30 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
       }
   }
 
-  payload_json = {
-      'date': processing_date,
-      'target_platform': target_platform,
-      'extra_parameters': extra_parameters,
-      'parent': {
-          'cid': parent_cid.replace('-', ''),
-          'file_name': parent_filename,
-          'file_path': parent_filepath,
-          'file_date': parent_date,
-          'total_files': parent_numchunks,
-          'total_rows': parent_numrows,
-      },
-      'child': {
-          'file_name': os.path.basename(child_filename),
-          'num_rows': child_numrows
-      }
-  }
-  # print(payload_json)
+  payload_json = _build_file_message(parent_cid,
+                     parent_filename, parent_filepath, parent_numchunks,
+                     parent_numrows, child_filename, child_numrows, parent_date,
+                     processing_date, extra_parameters, target_platform)
+
+  # payload_json = {
+  #    'date': processing_date,
+  #    'target_platform': target_platform,
+  #    'extra_parameters': extra_parameters,
+  #    'parent': {
+  #        'cid': parent_cid.replace('-', ''),
+  #        'file_name': parent_filename,
+  #        'file_path': parent_filepath,
+  #        'file_date': parent_date,
+  #        'total_files': parent_numchunks,
+  #        'total_rows': parent_numrows,
+  #    },
+  #    'child': {
+  #        'file_name': os.path.basename(child_filename),
+  #        'num_rows': child_numrows
+  #    }
+  #}
+
+  print(payload_json)
   # Add the payload
   payload = json.dumps(payload_json)
 
@@ -466,7 +545,7 @@ def file_slicer(data, context=Optional[Context]):
   bucket = data['bucket']
   if not all(elem in os.environ for elem in [
       'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
-      'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'SERVICE_ACCOUNT'
+      'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'SERVICE_ACCOUNT', 'STORE_RESPONSE_STATS_TOPIC'
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
@@ -481,6 +560,8 @@ def file_slicer(data, context=Optional[Context]):
     deployment_name = os.environ['DEPLOYMENT_NAME']
     solution_prefix = os.environ['SOLUTION_PREFIX']
     service_account = os.environ['SERVICE_ACCOUNT']
+    reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
+    full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
 
 
     try:
@@ -512,6 +593,16 @@ def file_slicer(data, context=Optional[Context]):
       source_file_name = f'input/{file_name}'
       target_file_name = f'{processing_date}/failed/{file_name}'
       _mv_blob(bucket, source_file_name, bucket, target_file_name)
+      parent_cid, parent_date = _extract_info_from_filename(file_name)
+      input_json = _build_file_message(parent_cid,
+                     file_name, os.path.dirname(file_name), -1,
+                     -1, file_name, -1, parent_date,
+                     processing_date, None, target_platform)
+
+      pubsub_payload = _add_errors_to_input_data(
+        input_json, -1)
+      _send_pubsub_message(project, full_path_topic, pubsub_payload)
+
       raise
 
 def main(argv: Sequence[str]) -> None:
