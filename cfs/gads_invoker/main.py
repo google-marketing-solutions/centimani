@@ -32,35 +32,103 @@ from google.ads.googleads.errors import GoogleAdsException
 from google.cloud import pubsub_v1
 from google.cloud import secretmanager
 from google.cloud import storage
+from google.cloud import datastore as store
+
 import pytz
 
 
-def _get_conversion_action_resources(client: GoogleAdsClient,
-                                     customer_id: str) -> Dict[str, Any]:
+
+def _upsert_conversion_actions_in_cache(db: store.client.Client,
+                                        customer_id: str,
+                                        actions: Dict[str, Any],
+                                        cache_ttl_in_hours: int):
+  """Inserts the cid and the conversion actions belonging to it into the cache.
+
+  Args:
+      db: Datastore client
+      customer_id: the cid of the customer    
+      actions: dictionary with the data to store
+      cache_ttl_in_hours: the time to live of the cache
+  """
+  key = db.key("cid", customer_id)
+  now = datetime.datetime.now(pytz.utc)
+  delta = datetime.timedelta(hours=cache_ttl_in_hours)
+  actions['expiration_timestamp'] = now + delta
+
+  with db.transaction():
+    cid = store.Entity(key=key)
+    cid.update({'actions': actions})
+    db.put(cid)
+  
+
+def _get_conversion_actions_from_cache(db: store.client.Client, 
+                                      customer_id: str) -> Dict[str, Any]:
   """Retrieves the resources for all conversion actions "indexed" by name.
+
+  In order to overcome GAds API quota problemas, it firsts looks up in the 
+  cache (datastore) for the value, if not hit it will query GAds API.
+
+  Args:
+      db: Datastore client
+      customer_id: the cid of the customer
+
+  Returns:
+      A dictionary with all the results
+  """
+
+  result = None
+  key = db.key("cid", customer_id)
+
+  with db.transaction():
+    res = db.get(key)
+
+  if res:
+    dict_result = res['actions']
+    if dict_result and dict_result['expiration_timestamp'] < datetime.datetime.now(pytz.utc):
+      return None
+    else:
+      del dict_result['expiration_timestamp']
+      return dict_result
+  else:
+    return None
+
+
+def _get_conversion_action_resources(client: GoogleAdsClient,
+                                     customer_id: str,
+                                     cache_ttl_in_hours: int) -> Dict[str, Any]:
+  """Retrieves the resources for all conversion actions "indexed" by name.
+
+  In order to overcome GAds API quota problemas, it firsts looks up in the 
+  cache (datastore) for the value, if not hit it will query GAds API.
 
   Args:
       client: GADsClient
       customer_id: the cid of the customer
+      cache_ttl_in_hours: the time to live of the cache
 
   Returns:
-      A boolean, whether or not the response message has a partial
-      failure error.
+      A dictionary with all the results
   """
-  ga_service = client.get_service('GoogleAdsService')
-  print('Extracting conversion information from customer ID {}'.format(
-      customer_id))
-  dict_result = {}
-  query = """
-      SELECT conversion_action.id, conversion_action.name FROM conversion_action
-      """
-  response = ga_service.search_stream(customer_id=customer_id, query=query)
-  for batch in response:
-    for row in batch.results:
-      dict_result[
-          row.conversion_action.name] = row.conversion_action.resource_name
 
-  return dict_result
+  db = store.Client()
+  cached_result = _get_conversion_actions_from_cache(db, customer_id)
+  if cached_result:
+    return cached_result
+  else:
+    ga_service = client.get_service('GoogleAdsService')
+    print('Extracting conversion information from customer ID {}'.format(
+        customer_id))
+    dict_result = {}
+    query = """
+        SELECT conversion_action.id, conversion_action.name FROM conversion_action
+        """
+    response = ga_service.search_stream(customer_id=customer_id, query=query)
+    for batch in response:
+      for row in batch.results:
+        dict_result[
+            row.conversion_action.name] = row.conversion_action.resource_name
+    _upsert_conversion_actions_in_cache(db, customer_id, dict_result, cache_ttl_in_hours)
+    return dict_result
 
 
 def _is_partial_failure_error_present(conversion_upload_response) -> bool:
@@ -195,9 +263,6 @@ def _upload_conversions(input_json: Dict[str, Any],
   Returns:
     None
   """
-
-  # conversion_actions_resources = _get_conversion_action_resources(
-  #    client, input_json['parent']['cid'])
 
   # Set timezone, extracting it from extra_parameters if supplied
   timezone = pytz.timezone('Etc/GMT')
@@ -490,7 +555,8 @@ def gads_invoker(request):
   """
   if not all(elem in os.environ for elem in [
       'DEFAULT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
-      'STORE_RESPONSE_STATS_TOPIC', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX'
+      'STORE_RESPONSE_STATS_TOPIC', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX',
+      'CACHE_TTL_IN_HOURS'
 
   ]):
     print('Cannot proceed, there are missing input values, '
@@ -502,6 +568,7 @@ def gads_invoker(request):
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
+  cache_ttl_in_hours = int(os.environ['CACHE_TTL_IN_HOURS'])
   config = _read_platform_config_from_secret(project_id,
                                              f'{deployment_name}_{solution_prefix}_gads_config')
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
@@ -517,7 +584,7 @@ def gads_invoker(request):
 
     client = _initialize_gads_client(config, login_cid)
     conversions_resources = _get_conversion_action_resources(
-        client, conversions_holder_cid)
+        client, conversions_holder_cid, cache_ttl_in_hours)
     result = _gads_invoker_worker(client, bucket_name, input_json,
                                   conversions_resources, project_id,
                                   full_path_topic, task_retries, max_attempts)
@@ -547,22 +614,22 @@ def main(argv: Optional[Sequence[str]]) -> None:
       None
   """
     # Replace with your testing JSON
-  input_string = (' {"date": "20210406", '
+  input_string = (' {"date": "20210415", '
     '"target_platform": "gads",'
     '"extra_parameters": ["Parameters:TimeZone=Europe/Madrid", "", "", "", ""],'
-    '"parent": {"cid": "6849178819", "file_name": "GADS_EGO_684-917-8819_876-730-8703_684-917-8819_20210406_4.csv",'
+    '"parent": {"cid": "6849178819", "file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv",'
     '"file_path": "input",'
-    '"file_date": "20210406",'
+    '"file_date": "20210415",'
     '"total_files": 100,'
     '"total_rows": 25000},'
-    '"child": {"file_name": "GADS_EGO_684-917-8819_876-730-8703_684-917-8819_20210406_4.csv---24",'
+    '"child": {"file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv---3",'
     '"num_rows": 250}}')
 
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
       'DEFAULT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
-      'STORE_RESPONSE_STATS_TOPIC'
+      'STORE_RESPONSE_STATS_TOPIC', 'CACHE_TTL_IN_HOURS'
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
@@ -572,6 +639,7 @@ def main(argv: Optional[Sequence[str]]) -> None:
   project_id = os.environ['DEFAULT_GCP_PROJECT']
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
+  cache_ttl_in_hours = int(os.environ['CACHE_TTL_IN_HOURS'])
   config = _read_platform_config_from_secret(project_id,
                                              f'{deployment_name}_{solution_prefix}_gads_config')
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
@@ -585,12 +653,13 @@ def main(argv: Optional[Sequence[str]]) -> None:
     client = _initialize_gads_client(config, login_cid)
 
     conversions_resources = _get_conversion_action_resources(
-        client, conversions_holder_cid)
+        client, conversions_holder_cid, cache_ttl_in_hours)
     result = _gads_invoker_worker(client, bucket_name, input_json,
                                   conversions_resources, project_id,
                                   full_path_topic, task_retries, max_attempts)
     print('Test execution returned: {}'.format(result))
   except Exception:
+    raise
     print('Unexpected exception raised during the process')
 
 if __name__ == '__main__':
