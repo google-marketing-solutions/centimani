@@ -232,10 +232,11 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
   # print('Created task {}'.format(response.name))
 
 
-def _write_chunk_to_blob(bucket_name, blob_name, data):
+def _write_chunk_to_blob(storage_client, bucket_name, blob_name, data):
   """Function to write a list of strings into a blob within a GCS bucket.
 
   Args:
+    storage_client: Google Cloud Storage client
     bucket_name (string): name of the source bucket
     blob_name (string): name of the blob to create
     data (list): list of strings to be written to the blob
@@ -243,23 +244,23 @@ def _write_chunk_to_blob(bucket_name, blob_name, data):
   Returns:
       None
   """
-  client = storage.Client()
   # CSV is created in /tmp with a random name and then uploaded to GCS
   random_filename = '/tmp/' + ''.join(
       random.choice(string.ascii_lowercase) for i in range(16)) + '.csv'
   with open(random_filename, 'w') as f:
     writer = csv.writer(f)
     writer.writerows(data)
-  bucket = client.get_bucket(bucket_name)
+  bucket = storage_client.get_bucket(bucket_name)
   blob = bucket.blob(blob_name)
   blob.upload_from_filename(random_filename)
   # print('Wrote chunk to file {}'.format(blob_name))
 
 
-def _read_csv_from_blob(bucket_name, blob_name):
+def _read_csv_from_blob(storage_client, bucket_name, blob_name):
   """Function to read a blob containing a CSV file and return it as an array.
 
   Args:
+    storage_client: Google Cloud Storage client
     bucket_name (string): name of the source bucket
     blob_name (string): name of the file to move
 
@@ -274,10 +275,11 @@ def _read_csv_from_blob(bucket_name, blob_name):
   return decoded_blob
 
 
-def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
+def _mv_blob(storage_client,bucket_name, blob_name, new_bucket_name, new_blob_name):
   """Function for moving files between directories or buckets in GCP.
 
   Args:
+    storage_client: Google Cloud Storage client
     bucket_name (string): name of the source bucket
     blob_name (string): name of the file to move
     new_bucket_name (string): name of target bucket (can be same as original)
@@ -286,7 +288,6 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
   Returns:
       None
   """
-  storage_client = storage.Client()
   source_bucket = storage_client.get_bucket(bucket_name)
   source_blob = source_bucket.blob(blob_name)
   destination_bucket = storage_client.get_bucket(new_bucket_name)
@@ -299,12 +300,13 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
   print(f'File moved from {blob_name} to {new_blob_name}')
 
 
-def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project,
+def _file_slicer_worker(client, storage_client, file_name, bucket_name, max_chunk_lines, project,
                         location, queue_config, invoker_url, service_account, target_platform):
   """Splits a file into smaller chunks with a specific number of lines.
 
   Args:
       client (tasks_v2.CloudTasksClient): the Cloud Tasks client
+      storage_client: Google Cloud Storage Client
       file_name (string): Name of the file to be splitted in chunks.
       bucket_name (string): Name of Cloud Storage Bucket containing the file.
       max_chunk_lines (integer): Max number of lines to write into each chunk.
@@ -332,7 +334,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
   parent_cid, parent_date = _extract_info_from_filename(parent_filename)
 
   # Load file in memory, read line by line and create chunks of a specific size
-  conversions_blob = _read_csv_from_blob(bucket_name, file_name)
+  conversions_blob = _read_csv_from_blob(storage_client, bucket_name, file_name)
   # print('Conversions blob: {}'.format(conversions_blob))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
   # print('Conversions list: {}'.format(conversions_list))
@@ -382,7 +384,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
       child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
       child_numrows = len(chunk_buffer)
       chunk_buffer.insert(0, header)
-      _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
+      _write_chunk_to_blob(storage_client, bucket_name, child_filename, chunk_buffer)
       _create_new_task(client, queue, project, location, queue_config,
                        parent_cid, parent_filename, parent_filepath,
                        parent_numchunks, parent_numrows, child_filename,
@@ -396,7 +398,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
     child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
     child_numrows = len(chunk_buffer)
     chunk_buffer.insert(0, header)
-    _write_chunk_to_blob(bucket_name, child_filename, chunk_buffer)
+    _write_chunk_to_blob(storage_client, bucket_name, child_filename, chunk_buffer)
     _create_new_task(client, queue, project, location, queue_config, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
@@ -407,7 +409,7 @@ def _file_slicer_worker(client, file_name, bucket_name, max_chunk_lines, project
         (format(num_chunks), format(parent_filename)))
 
   new_file_name = f'{processing_date}/processed/{parent_filename}'
-  _mv_blob(bucket_name, file_name, bucket_name, new_file_name)
+  _mv_blob(storage_client, bucket_name, file_name, bucket_name, new_file_name)
 
 def _extract_info_from_filename(filename: str) -> (str, str):
   """Extracts the parent cid and date from file name
@@ -553,6 +555,7 @@ def file_slicer(data, context=Optional[Context]):
   if file_name.endswith('.csv') and file_name.startswith('input/'):
     # Create a client.
     client = tasks_v2.CloudTasksClient()
+    storage_client = storage.Client()
     print('Processing file %s' % file_name)
 
     project = os.environ['DEFAULT_GCP_PROJECT']
@@ -584,7 +587,7 @@ def file_slicer(data, context=Optional[Context]):
                      project,
                      deployment_name,
                      solution_prefix)
-      _file_slicer_worker(client, file_name, bucket, max_chunk_lines, project, location,
+      _file_slicer_worker(client, storage_client, file_name, bucket, max_chunk_lines, project, location,
                           queue_config, invoker_url, service_account, target_platform)
     except Exception:
       now = datetime.datetime.now()
@@ -592,7 +595,7 @@ def file_slicer(data, context=Optional[Context]):
       file_name = os.path.basename(file_name)
       source_file_name = f'input/{file_name}'
       target_file_name = f'{processing_date}/failed/{file_name}'
-      _mv_blob(bucket, source_file_name, bucket, target_file_name)
+      _mv_blob(storage_client, bucket, source_file_name, bucket, target_file_name)
       parent_cid, parent_date = _extract_info_from_filename(file_name)
       input_json = _build_file_message(parent_cid,
                      file_name, os.path.dirname(file_name), -1,
