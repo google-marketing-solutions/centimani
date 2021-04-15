@@ -659,8 +659,8 @@ def main(argv: Optional[Sequence[str]]) -> None:
                                   full_path_topic, task_retries, max_attempts)
     print('Test execution returned: {}'.format(result))
   except Exception:
-    raise
     print('Unexpected exception raised during the process')
+    raise
 
 if __name__ == '__main__':
   app.run(main)
