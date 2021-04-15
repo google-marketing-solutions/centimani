@@ -31,6 +31,7 @@ create_gcs_bucket $DEFAULT_GCS_BUCKET $DEFAULT_GCP_REGION
 gcloud functions deploy "$DEPLOYMENT_NAME""_""$SOLUTION_PREFIX""_""$CF_NAME""" \
   --runtime python37 \
   --entry-point file_slicer \
+  --memory "$MEMORY" \
   --trigger-event google.storage.object.finalize \
   --trigger-resource "$DEFAULT_GCS_BUCKET" \
   --project "$DEFAULT_GCP_PROJECT" \
