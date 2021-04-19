@@ -94,7 +94,12 @@ def _insert_data_in_datastore(db: store.Client, data: Dict[str, Any]):
 
 def _build_data_for_store(data: Dict[str, Any]) -> Dict[str, Any]:
 
-    return {
+  child_errors = {}
+
+  if "errors" in data["child"]:
+    child_errors = data["child"]["errors"]
+
+  return {
     "cid": data["parent"]["cid"],
     "processing_date": data["date"],
     "target_platform": data["target_platform"],
@@ -106,8 +111,9 @@ def _build_data_for_store(data: Dict[str, Any]) -> Dict[str, Any]:
     "child_file_name": data["child"]["file_name"],
     "child_num_rows": data["child"]["num_rows"],
     "child_num_errors": data["child"]["num_errors"],
+    "child_errors": child_errors,
     "last_processed_timestamp": datetime.datetime.now(pytz.utc)
-  }
+    }
 
 
 def main(event: Dict[str, Any], context=Optional[Context]):
@@ -144,12 +150,34 @@ def _test_main():
           "total_rows": 200
       },
       "child": {
-          "file_name": "child_file_1",
+          "file_name": "child_file_2",
           "num_rows": 20,
-          "num_errors": 10
+          "num_errors": 10,
+          "errors": {}
       },
       "conversions_api_response": {}
   }
+  data = {
+      "date": "20210316",
+      "target_platform": "GAds",
+      "parent": {
+          "cid": "1234",
+          "file_name": "parent_file_1",
+          "file_path": "gs://a/b/c",
+          "file_date": "20210310",
+          "total_files": 10,
+          "total_rows": 200
+      },
+      "child": {
+          "file_name": "child_file_1",
+          "num_rows": 20,
+          "num_errors": 10,
+          "errors": {'ERROR_TYPE_1': 5,
+                     'ERROR_TYPE_2': 7}
+      },
+      "conversions_api_response": {}
+  }
+  
   main(
       event={"data": base64.b64encode(bytes(json.dumps(data).encode("utf-8")))})
 
