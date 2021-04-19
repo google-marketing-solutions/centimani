@@ -29,13 +29,11 @@ from absl import app
 from flask import Response
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.cloud import datastore as store
 from google.cloud import pubsub_v1
 from google.cloud import secretmanager
 from google.cloud import storage
-from google.cloud import datastore as store
-
 import pytz
-
 
 
 def _upsert_conversion_actions_in_cache(db: store.client.Client,
@@ -46,11 +44,11 @@ def _upsert_conversion_actions_in_cache(db: store.client.Client,
 
   Args:
       db: Datastore client
-      customer_id: the cid of the customer    
+      customer_id: the cid of the customer
       actions: dictionary with the data to store
       cache_ttl_in_hours: the time to live of the cache
   """
-  key = db.key("cid", customer_id)
+  key = db.key('cid', customer_id)
   now = datetime.datetime.now(pytz.utc)
   delta = datetime.timedelta(hours=cache_ttl_in_hours)
   actions['expiration_timestamp'] = now + delta
@@ -59,13 +57,13 @@ def _upsert_conversion_actions_in_cache(db: store.client.Client,
     cid = store.Entity(key=key)
     cid.update({'actions': actions})
     db.put(cid)
-  
 
-def _get_conversion_actions_from_cache(db: store.client.Client, 
-                                      customer_id: str) -> Dict[str, Any]:
+
+def _get_conversion_actions_from_cache(db: store.client.Client,
+                                       customer_id: str) -> Dict[str, Any]:
   """Retrieves the resources for all conversion actions "indexed" by name.
 
-  In order to overcome GAds API quota problemas, it firsts looks up in the 
+  In order to overcome GAds API quota problemas, it firsts looks up in the
   cache (datastore) for the value, if not hit it will query GAds API.
 
   Args:
@@ -76,15 +74,15 @@ def _get_conversion_actions_from_cache(db: store.client.Client,
       A dictionary with all the results
   """
 
-  result = None
-  key = db.key("cid", customer_id)
+  key = db.key('cid', customer_id)
 
   with db.transaction():
     res = db.get(key)
 
   if res:
     dict_result = res['actions']
-    if dict_result and dict_result['expiration_timestamp'] < datetime.datetime.now(pytz.utc):
+    if dict_result and dict_result[
+        'expiration_timestamp'] < datetime.datetime.now(pytz.utc):
       return None
     else:
       del dict_result['expiration_timestamp']
@@ -98,7 +96,7 @@ def _get_conversion_action_resources(client: GoogleAdsClient,
                                      cache_ttl_in_hours: int) -> Dict[str, Any]:
   """Retrieves the resources for all conversion actions "indexed" by name.
 
-  In order to overcome GAds API quota problemas, it firsts looks up in the 
+  In order to overcome GAds API quota problemas, it firsts looks up in the
   cache (datastore) for the value, if not hit it will query GAds API.
 
   Args:
@@ -127,7 +125,8 @@ def _get_conversion_action_resources(client: GoogleAdsClient,
       for row in batch.results:
         dict_result[
             row.conversion_action.name] = row.conversion_action.resource_name
-    _upsert_conversion_actions_in_cache(db, customer_id, dict_result, cache_ttl_in_hours)
+    _upsert_conversion_actions_in_cache(db, customer_id, dict_result,
+                                        cache_ttl_in_hours)
     return dict_result
 
 
@@ -159,9 +158,12 @@ def _count_partial_errors(client: GoogleAdsClient,
   Returns:
       An integer representing the total number of partial errors in the response
       failure error.
+      A list containing the code, message and number of times that each unique
+      error code was returned by the API for one of the conversions uploaded.
   """
   error_count = 0
-
+  error_stats = {}
+  error_array = []
   if _is_partial_failure_error_present(conversion_upload_response):
     partial_failure = getattr(conversion_upload_response,
                               'partial_failure_error', None)
@@ -173,11 +175,24 @@ def _count_partial_errors(client: GoogleAdsClient,
       failure_object_des = google_ads_failure.deserialize(error_detail.value)
       error_count += len(failure_object_des.errors)
       for error in failure_object_des.errors:
+        str_code = str(error.error_code).strip()
+        if str_code in error_stats:
+          error_stats[str_code]['count'] += 1
+        else:
+          error_stats[str_code] = {}
+          error_stats[str_code]['count'] = 1
+          error_stats[str_code]['message'] = str(error.message).strip()
         print('A partial failure at index '
               f'{error.location.field_path_elements[0].index} occurred '
               f'\nError message: {error.message}\nError code: '
               f'{error.error_code}')
-  return error_count
+    for code_key in error_stats:
+      error_array.append({
+          'code': code_key,
+          'message': code_key['message'],
+          'count': code_key['count']
+      })
+  return error_count, error_array
 
 
 def _add_errors_to_input_data(data: Dict[str, Any],
@@ -314,8 +329,12 @@ def _upload_conversions(input_json: Dict[str, Any],
             request=request,
         )
     )
+    num_partial_errors, error_array = _count_partial_errors(
+        client, conversion_upload_response)
     pubsub_payload = _add_errors_to_input_data(
-        input_json, _count_partial_errors(client, conversion_upload_response))
+        input_json, num_partial_errors)
+    if error_array:
+      pubsub_payload['child']['errors'] = error_array
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
     # Move blob to /slices_processed after a successful execution
     new_file_name = full_chunk_path.replace('slices_processing/',
@@ -456,7 +475,8 @@ def _gads_invoker_worker(client: GoogleAdsClient, bucket_name: str,
     return 200
 
 
-def _initialize_gads_client(config: Dict[str, Any], login_customer_id: str) -> GoogleAdsClient:
+def _initialize_gads_client(config: Dict[str, Any],
+                            login_customer_id: str) -> GoogleAdsClient:
   """Initialized and returns Google Ads API client.
 
   Args:
@@ -473,7 +493,8 @@ def _initialize_gads_client(config: Dict[str, Any], login_customer_id: str) -> G
       format='[%(asctime)s - %(levelname)s] %(message).5000s')
   logging.getLogger('google.ads.googleads.client').setLevel(logging.WARNING)
   if login_customer_id in config['credentials']:
-    client = GoogleAdsClient.load_from_dict(config["credentials"][login_customer_id])
+    client = GoogleAdsClient.load_from_dict(
+        config['credentials'][login_customer_id])
     return client
   else:
     raise Exception(f'Credentials for {login_customer_id} not found')
@@ -569,8 +590,8 @@ def gads_invoker(request):
   solution_prefix = os.environ['SOLUTION_PREFIX']
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
   cache_ttl_in_hours = int(os.environ['CACHE_TTL_IN_HOURS'])
-  config = _read_platform_config_from_secret(project_id,
-                                             f'{deployment_name}_{solution_prefix}_gads_config')
+  config = _read_platform_config_from_secret(
+      project_id, f'{deployment_name}_{solution_prefix}_gads_config')
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
   input_json = request.get_json(silent=True)
 
@@ -613,7 +634,7 @@ def main(argv: Optional[Sequence[str]]) -> None:
   Returns:
       None
   """
-    # Replace with your testing JSON
+  # Replace with your testing JSON
   input_string = (' {"date": "20210415", '
     '"target_platform": "gads",'
     '"extra_parameters": ["Parameters:TimeZone=Europe/Madrid", "", "", "", ""],'
@@ -640,8 +661,8 @@ def main(argv: Optional[Sequence[str]]) -> None:
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
   cache_ttl_in_hours = int(os.environ['CACHE_TTL_IN_HOURS'])
-  config = _read_platform_config_from_secret(project_id,
-                                             f'{deployment_name}_{solution_prefix}_gads_config')
+  config = _read_platform_config_from_secret(
+      project_id, f'{deployment_name}_{solution_prefix}_gads_config')
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
   max_attempts = _get_max_attempts(config)
   full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'

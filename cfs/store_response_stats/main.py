@@ -132,52 +132,42 @@ def main(event: Dict[str, Any], context=Optional[Context]):
   data = base64.b64decode(event["data"])
   input_data = json.loads(data)
   db = store.Client(DEFAULT_GCP_PROJECT)
-  _insert_data_in_datastore(db, 
+  _insert_data_in_datastore(db,
     _build_data_for_store(input_data)
   )
 
 
 def _test_main():
   data = {
-      "date": "20210316",
-      "target_platform": "GAds",
-      "parent": {
-          "cid": "1234",
-          "file_name": "parent_file_1",
-          "file_path": "gs://a/b/c",
-          "file_date": "20210310",
-          "total_files": 10,
-          "total_rows": 200
-      },
-      "child": {
-          "file_name": "child_file_2",
-          "num_rows": 20,
-          "num_errors": 10,
-          "errors": {}
-      },
-      "conversions_api_response": {}
+    "date":"20210420",
+    "target_platform":"gads",
+    "extra_parameters":[
+        "Parameters:TimeZone=Europe/Madrid",
+        "",
+        "",
+        "",
+        ""
+    ],
+    "parent":{
+        "cid":"1234",
+        "file_name":"file.csv",
+        "file_path":"input",
+        "file_date":"20210420",
+        "total_files":100,
+        "total_rows":25000
+    },
+    "child":{
+        "file_name":"file.csv---1",
+        "num_rows":250,
+        "num_errors":48,
+        "errors":[{
+            "code": "conversion_upload_error: UNAUTHORIZED_CUSTOMER",
+            "message":"Click owned by a non managed account.",
+            "count":48
+          }]
+    }
   }
-  data = {
-      "date": "20210316",
-      "target_platform": "GAds",
-      "parent": {
-          "cid": "1234",
-          "file_name": "parent_file_1",
-          "file_path": "gs://a/b/c",
-          "file_date": "20210310",
-          "total_files": 10,
-          "total_rows": 200
-      },
-      "child": {
-          "file_name": "child_file_1",
-          "num_rows": 20,
-          "num_errors": 10,
-          "errors": {'ERROR_TYPE_1': 5,
-                     'ERROR_TYPE_2': 7}
-      },
-      "conversions_api_response": {}
-  }
-  
+
   main(
       event={"data": base64.b64encode(bytes(json.dumps(data).encode("utf-8")))})
 
