@@ -19,7 +19,7 @@
 
 CONFIG_PATH="../../deploy/config.yaml"
 HELPERS_PATH="../../deploy/helpers.sh"
-MEMORY="512MB"
+MEMORY="2GB"
 TIMEOUT="540"
 
 source "$HELPERS_PATH"

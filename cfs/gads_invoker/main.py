@@ -189,8 +189,8 @@ def _count_partial_errors(client: GoogleAdsClient,
     for code_key in error_stats:
       error_array.append({
           'code': code_key,
-          'message': code_key['message'],
-          'count': code_key['count']
+          'message': error_stats[code_key]['message'],
+          'count': error_stats[code_key]['count']
       })
   return error_count, error_array
 
