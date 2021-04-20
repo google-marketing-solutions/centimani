@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import sys
-import traceback
+#import traceback
 from typing import Any, Dict, Sequence, Optional
 
 from absl import app
@@ -254,6 +254,27 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
 
   print(f'File moved from {blob_name} to {new_blob_name}')
 
+def _mv_blob_if_last_try(task_retries, max_attempts, input_json, bucket_name):
+  """Checks if it is the last attempt and moves the chunk to the failed folder.
+
+  Args:
+    task_retries: Retry number passed from Cloud Tasks
+    max_attempts: Max number of configured retries
+    input_json: Configuration information
+    bucket_name: Name of the GCS file storing the chunks
+
+  Returns:
+    None
+  """
+
+  if task_retries + 1 == max_attempts:
+    datestamp = input_json['date']
+    chunk_filename = input_json['child']['file_name']
+    full_chunk_path = datestamp + '/slices_processing/' + chunk_filename
+    new_file_name = full_chunk_path.replace('slices_processing/',
+                                            'slices_failed/')
+    _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
+
 
 def _upload_conversions(input_json: Dict[str, Any],
                         conversion_actions_resources: Dict[str, Any],
@@ -347,10 +368,7 @@ def _upload_conversions(input_json: Dict[str, Any],
                                                input_json['child']['num_rows'])
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
     # If last try, move blob to /slices_failed
-    if task_retries + 1 == max_attempts:
-      new_file_name = full_chunk_path.replace('slices_processing/',
-                                              'slices_failed/')
-      _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
+    _mv_blob_if_last_try(task_retries, max_attempts, input_json, bucket_name)
     return 500
   except Exception:
     print('Unexpected error:', sys.exc_info()[0])
@@ -358,10 +376,7 @@ def _upload_conversions(input_json: Dict[str, Any],
                                                input_json['child']['num_rows'])
     _send_pubsub_message(project_id, reporting_topic, pubsub_payload)
     # If last try, move blob to /slices_failed
-    if task_retries + 1 == max_attempts:
-      new_file_name = full_chunk_path.replace('slices_processing/',
-                                              'slices_failed/')
-      _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
+    _mv_blob_if_last_try(task_retries, max_attempts, input_json, bucket_name)
     return 500
 
 
@@ -613,21 +628,18 @@ def gads_invoker(request):
 
     return Response('', result)
   except Exception:
-    print('ERROR: Unexpected exception raised during the process')
-    str_traceback = traceback.format_exc()
+    print('ERROR: Unexpected exception raised during the process: ',
+          sys.exc_info()[0])
+    #str_traceback = traceback.format_exc()
     print('Unexpected exception traceback follows:')
-    print(str_traceback)
+    #print(str_traceback)
 
     pubsub_payload = _add_errors_to_input_data(input_json,
                                                input_json['child']['num_rows'])
     _send_pubsub_message(project_id, full_path_topic, pubsub_payload)
-    datestamp = input_json['date']
-    chunk_filename = input_json['child']['file_name']
-    full_chunk_path = datestamp + '/slices_processing/' + chunk_filename
-    new_file_name = full_chunk_path.replace('slices_processing/',
-                                            'slices_failed/')
-    _mv_blob(bucket_name, full_chunk_path, bucket_name, new_file_name)
-    return Response('', 200)
+    # If last try, move blob to /slices_failed
+    _mv_blob_if_last_try(task_retries, max_attempts, input_json, bucket_name)
+    return Response('', 500)
 
 
 def main(argv: Optional[Sequence[str]]) -> None:
