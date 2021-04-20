@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import sys
+import traceback
 from typing import Any, Dict, Sequence, Optional
 
 from absl import app
@@ -613,6 +614,10 @@ def gads_invoker(request):
     return Response('', result)
   except Exception:
     print('ERROR: Unexpected exception raised during the process')
+    str_traceback = traceback.format_exc()
+    print('Unexpected exception traceback follows:')
+    print(str_traceback)
+
     pubsub_payload = _add_errors_to_input_data(input_json,
                                                input_json['child']['num_rows'])
     _send_pubsub_message(project_id, full_path_topic, pubsub_payload)
