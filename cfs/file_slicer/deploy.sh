@@ -26,14 +26,15 @@ eval "$(parse_yaml $CONFIG_PATH)"
 CF_NAME=$CF_NAME_SLICER
 CFG_FILE=$(cat $CONFIG_PATH $CUSTOM_CONFIG_PATH > ./__config.yaml)
 
-create_gcs_bucket $DEFAULT_GCS_BUCKET $DEFAULT_GCP_REGION
+create_gcs_bucket $INPUT_GCS_BUCKET $DEFAULT_GCP_REGION
+create_gcs_bucket $OUTPUT_GCS_BUCKET $DEFAULT_GCP_REGION
 
 gcloud functions deploy "$DEPLOYMENT_NAME""_""$SOLUTION_PREFIX""_""$CF_NAME""" \
   --runtime python37 \
   --entry-point file_slicer \
   --memory "$MEMORY" \
   --trigger-event google.storage.object.finalize \
-  --trigger-resource "$DEFAULT_GCS_BUCKET" \
+  --trigger-resource "$INPUT_GCS_BUCKET" \
   --project "$DEFAULT_GCP_PROJECT" \
   --region "$DEFAULT_GCP_REGION" \
   --service-account "$SERVICE_ACCOUNT" \

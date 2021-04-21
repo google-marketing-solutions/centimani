@@ -29,7 +29,8 @@ DEFAULT_GCP_REGION: 'europe-west1'
 
 # GCS settings
 # =====================================================================
-DEFAULT_GCS_BUCKET: 'ego_conversions_import'
+OUTPUT_GCS_BUCKET: 'ego_conversions_import_output'
+INPUT_GCS_BUCKET: 'ego_conversions_import_input'
 
 # BQ settings
 # =====================================================================

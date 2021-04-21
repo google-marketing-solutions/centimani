@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import sys
-#import traceback
+# import traceback
 from typing import Any, Dict, Sequence, Optional
 
 from absl import app
@@ -253,6 +253,7 @@ def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
   source_blob.delete()
 
   print(f'File moved from {blob_name} to {new_blob_name}')
+
 
 def _mv_blob_if_last_try(task_retries, max_attempts, input_json, bucket_name):
   """Checks if it is the last attempt and moves the chunk to the failed folder.
@@ -591,7 +592,7 @@ def gads_invoker(request):
         <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
   """
   if not all(elem in os.environ for elem in [
-      'DEFAULT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
+      'OUTPUT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
       'STORE_RESPONSE_STATS_TOPIC', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX',
       'CACHE_TTL_IN_HOURS'
 
@@ -600,7 +601,7 @@ def gads_invoker(request):
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
 
-  bucket_name = os.environ['DEFAULT_GCS_BUCKET']
+  bucket_name = os.environ['OUTPUT_GCS_BUCKET']
   project_id = os.environ['DEFAULT_GCP_PROJECT']
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
@@ -630,9 +631,9 @@ def gads_invoker(request):
   except Exception:
     print('ERROR: Unexpected exception raised during the process: ',
           sys.exc_info()[0])
-    #str_traceback = traceback.format_exc()
+    # str_traceback = traceback.format_exc()
     print('Unexpected exception traceback follows:')
-    #print(str_traceback)
+    # print(str_traceback)
 
     pubsub_payload = _add_errors_to_input_data(input_json,
                                                input_json['child']['num_rows'])
@@ -666,14 +667,14 @@ def main(argv: Optional[Sequence[str]]) -> None:
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
-      'DEFAULT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
+      'OUTPUT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
       'STORE_RESPONSE_STATS_TOPIC', 'CACHE_TTL_IN_HOURS'
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
 
-  bucket_name = os.environ['DEFAULT_GCS_BUCKET']
+  bucket_name = os.environ['OUTPUT_GCS_BUCKET']
   project_id = os.environ['DEFAULT_GCP_PROJECT']
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']

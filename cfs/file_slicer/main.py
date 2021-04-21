@@ -17,9 +17,9 @@
 #
 # -*- coding: utf-8 -*-
 
-import copy
 import csv
 import datetime
+import hashlib
 import io
 import json
 import math
@@ -27,17 +27,16 @@ import os
 import random
 import string
 import sys
-import hashlib
-
 from typing import Any, Dict, Sequence, Optional
+
 from absl import app
+from google.api_core.exceptions import NotFound
+from google.cloud import pubsub_v1
+from google.cloud import secretmanager
 from google.cloud import storage
 from google.cloud import tasks_v2
-from google.api_core.exceptions import NotFound
 from google.cloud.functions_v1.context import Context
 from google.protobuf import duration_pb2
-from google.cloud import secretmanager
-from google.cloud import pubsub_v1
 
 
 def _send_pubsub_message(project_id, topic, pubsub_payload):
@@ -54,6 +53,7 @@ def _send_pubsub_message(project_id, topic, pubsub_payload):
   publisher.publish(
       topic_path_reporting, data=bytes(json.dumps(pubsub_payload),
                                        'utf-8')).result()
+
 
 def _add_errors_to_input_data(data: Dict[str, Any],
                               num_errors: int) -> Dict[str, Any]:
@@ -77,9 +77,17 @@ def _get_file_parameters(csv_line: str) -> Dict[str, Any]:
     return []
 
 
-def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
-                                                                        Any]):
+def _upsert_queue(client: tasks_v2.CloudTasksClient,
+                  queue_config: Dict[str, Any]):
+  """Returns an instance of a Cloud Tasks queue as per the provided config.
 
+  Args:
+    client (tasks_v2.CloudTasksClient): Cloud Tasks client instance.
+    queue_config (Dict[str, Any]): Queue configuration parameters.
+
+  Returns:
+    An instance of a Cloud tasks queue
+  """
   # Check if the queue exists
   try:
     queue = client.get_queue(name=queue_config['name'])
@@ -103,10 +111,11 @@ def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
 
   return queue
 
-def _build_file_message(parent_cid,
-                     parent_filename, parent_filepath, parent_numchunks,
-                     parent_numrows, child_filename, child_numrows, parent_date,
-                     processing_date, extra_parameters, target_platform):
+
+def _build_file_message(parent_cid, parent_filename, parent_filepath,
+                        parent_numchunks, parent_numrows, child_filename,
+                        child_numrows, parent_date, processing_date,
+                        extra_parameters, target_platform):
   """Creates a JSON payload representing the file to preocess.
 
   Args:
@@ -119,7 +128,7 @@ def _build_file_message(parent_cid,
     child_numrows (integer): number of rows in the child file.
     parent_date (string): date when the file was created
     processing_date (string): date when the file is being processed
-    extra_parameters: string array representing the extra parameters for the platform
+    extra_parameters: string array containing extra parameters for the platform
     target_platform: string representing the platform to send the task to
 
   Returns:
@@ -144,10 +153,12 @@ def _build_file_message(parent_cid,
       }
   }
 
-def _create_new_task(client, queue, project, location, queue_name, parent_cid,
+
+def _create_new_task(client, queue, project, location, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
-                     processing_date, url, extra_parameters, service_account, target_platform):
+                     processing_date, url, extra_parameters, service_account,
+                     target_platform):
   """Creates a new task in Cloud Tasks to process a chunk of conversions.
 
   Args:
@@ -155,7 +166,6 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
     queue (Queue): cloud task queue to insert the task into
     project (string): name of the GCP project.
     location (string): location where Cloud Tasks is running.
-    queue_config (Dict[str, Any]): config for the cloud task
     parent_cid (string): CID associated with the parent file.
     parent_filename (string): file name of the parent file.
     parent_filepath (string): file path for the parent file.
@@ -166,7 +176,7 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
     parent_date (string): date when the file was created
     processing_date (string): date when the file is being processed
     url (string): url of the cloud function to be triggered by the task.
-    extra_parameters: string array representing the extra parameters for the platform
+    extra_parameters: string array containing extra parameters for the platform
     service_account: string representing the service account to use for auth
     target_platform: string representing the platform to send the task to
 
@@ -186,15 +196,17 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
           'http_method': tasks_v2.HttpMethod.POST,
           'url': url,  # The full url path that the task will be sent to.
           'oidc_token': {
-            'service_account_email': service_account,
+              'service_account_email': service_account,
           },
       }
   }
 
-  payload_json = _build_file_message(parent_cid,
-                     parent_filename, parent_filepath, parent_numchunks,
-                     parent_numrows, child_filename, child_numrows, parent_date,
-                     processing_date, extra_parameters, target_platform)
+  payload_json = _build_file_message(parent_cid, parent_filename,
+                                     parent_filepath, parent_numchunks,
+                                     parent_numrows, child_filename,
+                                     child_numrows, parent_date,
+                                     processing_date, extra_parameters,
+                                     target_platform)
 
   # payload_json = {
   #    'date': processing_date,
@@ -214,7 +226,6 @@ def _create_new_task(client, queue, project, location, queue_name, parent_cid,
   #    }
   #}
 
-  print(payload_json)
   # Add the payload
   payload = json.dumps(payload_json)
 
@@ -275,7 +286,8 @@ def _read_csv_from_blob(storage_client, bucket_name, blob_name):
   return decoded_blob
 
 
-def _mv_blob(storage_client,bucket_name, blob_name, new_bucket_name, new_blob_name):
+def _mv_blob(storage_client, bucket_name, blob_name, new_bucket_name,
+             new_blob_name):
   """Function for moving files between directories or buckets in GCP.
 
   Args:
@@ -300,15 +312,18 @@ def _mv_blob(storage_client,bucket_name, blob_name, new_bucket_name, new_blob_na
   print(f'File moved from {blob_name} to {new_blob_name}')
 
 
-def _file_slicer_worker(client, storage_client, file_name, bucket_name, max_chunk_lines, project,
-                        location, queue_config, invoker_url, service_account, target_platform):
+def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
+                        output_bucket_name, max_chunk_lines, project,
+                        location, queue_config, invoker_url, service_account,
+                        target_platform):
   """Splits a file into smaller chunks with a specific number of lines.
 
   Args:
       client (tasks_v2.CloudTasksClient): the Cloud Tasks client
       storage_client: Google Cloud Storage Client
       file_name (string): Name of the file to be splitted in chunks.
-      bucket_name (string): Name of Cloud Storage Bucket containing the file.
+      input_bucket_name (string): Name of Storage Bucket containing input file.
+      output_bucket_name (string): Name of Storage Bucket for output files.
       max_chunk_lines (integer): Max number of lines to write into each chunk.
       project (string): name of the GCP project
       location (string): location of the GCP project
@@ -334,7 +349,8 @@ def _file_slicer_worker(client, storage_client, file_name, bucket_name, max_chun
   parent_cid, parent_date = _extract_info_from_filename(parent_filename)
 
   # Load file in memory, read line by line and create chunks of a specific size
-  conversions_blob = _read_csv_from_blob(storage_client, bucket_name, file_name)
+  conversions_blob = _read_csv_from_blob(storage_client, input_bucket_name,
+                                         file_name)
   # print('Conversions blob: {}'.format(conversions_blob))
   conversions_list = csv.reader(io.StringIO(conversions_blob))
   # print('Conversions list: {}'.format(conversions_list))
@@ -353,7 +369,6 @@ def _file_slicer_worker(client, storage_client, file_name, bucket_name, max_chun
   for conversion_info in conversions_list:
     num_rows = num_rows + 1
 
-
     if num_rows > 2:
       chunk_buffer.append(conversion_info)
       chunk_lines += 1
@@ -369,26 +384,24 @@ def _file_slicer_worker(client, storage_client, file_name, bucket_name, max_chun
           parent_numrows = parent_numrows -1
       else:
         if num_rows == 2:
-          # If parameters line, was present, second row is header
+          # If parameters line was present, second row is header
           if len(extra_params) > 0:
             header = conversion_info
-          else: # else it's a conversion line
+          else:  # else it's a conversion line
             chunk_buffer.append(conversion_info)
             chunk_lines += 1
 
-
     if (chunk_lines > 0) and (chunk_lines % max_chunk_lines == 0):
-      # print(f'{chunk_lines} % {max_chunk_lines}')
       num_chunks = num_chunks + 1
-      # print('New chunk created, total number for now is {}'.format(num_chunks))
       child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
       child_numrows = len(chunk_buffer)
       chunk_buffer.insert(0, header)
-      _write_chunk_to_blob(storage_client, bucket_name, child_filename, chunk_buffer)
-      _create_new_task(client, queue, project, location, queue_config,
-                       parent_cid, parent_filename, parent_filepath,
-                       parent_numchunks, parent_numrows, child_filename,
-                       child_numrows, parent_date, processing_date, invoker_url,
+      _write_chunk_to_blob(storage_client, output_bucket_name, child_filename,
+                           chunk_buffer)
+      _create_new_task(client, queue, project, location, parent_cid,
+                       parent_filename, parent_filepath, parent_numchunks,
+                       parent_numrows, child_filename, child_numrows,
+                       parent_date, processing_date, invoker_url,
                        extra_params, service_account, target_platform)
       chunk_lines = 0
       chunk_buffer = []
@@ -398,8 +411,9 @@ def _file_slicer_worker(client, storage_client, file_name, bucket_name, max_chun
     child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
     child_numrows = len(chunk_buffer)
     chunk_buffer.insert(0, header)
-    _write_chunk_to_blob(storage_client, bucket_name, child_filename, chunk_buffer)
-    _create_new_task(client, queue, project, location, queue_config, parent_cid,
+    _write_chunk_to_blob(storage_client, output_bucket_name, child_filename,
+                         chunk_buffer)
+    _create_new_task(client, queue, project, location, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
                      processing_date, invoker_url,
@@ -409,10 +423,12 @@ def _file_slicer_worker(client, storage_client, file_name, bucket_name, max_chun
         (format(num_chunks), format(parent_filename)))
 
   new_file_name = f'{processing_date}/processed/{parent_filename}'
-  _mv_blob(storage_client, bucket_name, file_name, bucket_name, new_file_name)
+  _mv_blob(storage_client, input_bucket_name, file_name, output_bucket_name,
+           new_file_name)
+
 
 def _extract_info_from_filename(filename: str) -> (str, str):
-  """Extracts the parent cid and date from file name
+  """Extracts the parent cid and date from file name.
 
     File format is as follows:
 
@@ -424,6 +440,9 @@ def _extract_info_from_filename(filename: str) -> (str, str):
   Returns:
         The cid of the file
         The date of the file
+
+  Raises:
+     Exception: File name format is not correct
   """
   arr = filename.split('_')
 
@@ -438,7 +457,7 @@ def _extract_info_from_filename(filename: str) -> (str, str):
 def _get_target_platform(file_name: str) -> str:
   """Returns the platform name from the file name.
 
-     The first token of the file name will correspond to the target platform identifier.
+     First token in the file name will contain the target platform identifier.
 
   Args:
       file_name: the name of the input file to the slicer
@@ -447,6 +466,7 @@ def _get_target_platform(file_name: str) -> str:
       A string representing the target platform
   """
   return file_name.split('_')[0].lower()
+
 
 def _get_invoker_url(platform: str,
                      location: str,
@@ -471,12 +491,19 @@ def _get_invoker_url(platform: str,
 
 def _get_queue_config(client: tasks_v2.CloudTasksClient,
                       project: str,
-                      deployment_name: str,
-                      solution_prefix: str,
                       location: str,
-                      platform: str,
                       config: Dict[str, Any]) -> Dict[str, Any]:
+  """Returns configuration for the Cloud Tasks queue.
 
+  Args:
+      client: a Cloud Tasks client
+      project: project where the cloud function is deployed
+      location: location of the cloud function
+      config: configuration parameters to be used in the queue
+
+  Returns:
+      An object containing the queue configuration
+  """
   min_backoff = duration_pb2.Duration()
   min_backoff.seconds = config['queue_config']['retry_config']['min_backoff']
 
@@ -489,31 +516,44 @@ def _get_queue_config(client: tasks_v2.CloudTasksClient,
 
   max_retry = duration_pb2.Duration()
   # Max retry = 10 + 20 + 40 + 8 + 160 + 240 + 300 + 300 + 300 + 300
-  max_retry.seconds = config['queue_config']['retry_config']['max_retry_duration']
+  max_retry.seconds = config['queue_config']['retry_config'][
+      'max_retry_duration']
 
   queue_config = {
-      'name': client.queue_path(project, location, config['queue_config']['name']),
+      'name':
+          client.queue_path(project, location, config['queue_config']['name']),
       'rate_limits': {
-          'max_dispatches_per_second': config['queue_config']['rate_limits']['max_dispatches_per_second'],
-          'max_concurrent_dispatches': config['queue_config']['rate_limits']['max_concurrent_dispatches'],
+          'max_dispatches_per_second':
+              config['queue_config']['rate_limits']
+              ['max_dispatches_per_second'],
+          'max_concurrent_dispatches':
+              config['queue_config']['rate_limits']
+              ['max_concurrent_dispatches'],
       },
       'retry_config': {
-          'max_attempts': config['queue_config']['retry_config']['max_attempts'],
-          'max_retry_duration': max_retry,
-          'min_backoff': min_backoff,
-          'max_backoff': max_backoff,
-          'max_doublings': config['queue_config']['retry_config']['max_doublings'],
+          'max_attempts':
+              config['queue_config']['retry_config']['max_attempts'],
+          'max_retry_duration':
+              max_retry,
+          'min_backoff':
+              min_backoff,
+          'max_backoff':
+              max_backoff,
+          'max_doublings':
+              config['queue_config']['retry_config']['max_doublings'],
       }
   }
 
   return queue_config
 
-def _read_platform_config_from_secret(project_id: str, secret_id: str) -> Dict[str, Any]:
+
+def _read_platform_config_from_secret(project_id: str,
+                                      secret_id: str) -> Dict[str, Any]:
   """Gets the config for the platform.
 
   Args:
-      project_id: the project name where the secret is defined
-      secret_id: the string representing the id to address the secret with the config
+      project_id: project name where the secret is defined
+      secret_id: string representing the id of the secret containing the config
 
   Returns:
       A dictionary containing the conifguration
@@ -528,6 +568,7 @@ def _read_platform_config_from_secret(project_id: str, secret_id: str) -> Dict[s
   data = json.loads(payload)
 
   return data
+
 
 def file_slicer(data, context=Optional[Context]):
   """Background Cloud Function to be triggered by Cloud Storage.
@@ -544,15 +585,16 @@ def file_slicer(data, context=Optional[Context]):
   """
   del context  # Not used
   file_name = data['name']
-  bucket = data['bucket']
+  input_bucket = data['bucket']
   if not all(elem in os.environ for elem in [
       'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
-      'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'SERVICE_ACCOUNT', 'STORE_RESPONSE_STATS_TOPIC'
+      'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'SERVICE_ACCOUNT',
+      'STORE_RESPONSE_STATS_TOPIC', 'OUTPUT_GCS_BUCKET'
   ]):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
-  if file_name.endswith('.csv') and file_name.startswith('input/'):
+  if file_name.endswith('.csv'):
     # Create a client.
     client = tasks_v2.CloudTasksClient()
     storage_client = storage.Client()
@@ -564,49 +606,48 @@ def file_slicer(data, context=Optional[Context]):
     solution_prefix = os.environ['SOLUTION_PREFIX']
     service_account = os.environ['SERVICE_ACCOUNT']
     reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
+    output_bucket = os.environ['OUTPUT_GCS_BUCKET']
     full_path_topic = f'{deployment_name}.{solution_prefix}.{reporting_topic}'
-
 
     try:
 
       target_platform = _get_target_platform(os.path.basename(file_name))
 
       config = _read_platform_config_from_secret(project,
-                    f'{deployment_name}_{solution_prefix}_{target_platform}_config')
+                                                 f'{deployment_name}_{solution_prefix}_{target_platform}_config')
 
       max_chunk_lines = config['slicer']['max_chunk_lines']
       queue_config = _get_queue_config(client,
                                        project,
-                                       deployment_name,
-                                       solution_prefix,
                                        location,
-                                       target_platform,
                                        config)
       invoker_url = _get_invoker_url(target_platform,
-                     location,
-                     project,
-                     deployment_name,
-                     solution_prefix)
-      _file_slicer_worker(client, storage_client, file_name, bucket, max_chunk_lines, project, location,
-                          queue_config, invoker_url, service_account, target_platform)
+                                     location,
+                                     project,
+                                     deployment_name,
+                                     solution_prefix)
+      _file_slicer_worker(client, storage_client, file_name, input_bucket,
+                          output_bucket, max_chunk_lines, project, location,
+                          queue_config, invoker_url, service_account,
+                          target_platform)
     except Exception:
       now = datetime.datetime.now()
       processing_date = now.strftime('%Y%m%d')
       file_name = os.path.basename(file_name)
       source_file_name = f'input/{file_name}'
       target_file_name = f'{processing_date}/failed/{file_name}'
-      _mv_blob(storage_client, bucket, source_file_name, bucket, target_file_name)
+      _mv_blob(storage_client, input_bucket, source_file_name, output_bucket,
+               target_file_name)
       parent_cid, parent_date = _extract_info_from_filename(file_name)
       input_json = _build_file_message(parent_cid,
-                     file_name, os.path.dirname(file_name), -1,
-                     -1, file_name, -1, parent_date,
-                     processing_date, None, target_platform)
+                                       file_name, os.path.dirname(file_name),
+                                       -1, -1, file_name, -1, parent_date,
+                                       processing_date, None, target_platform)
 
-      pubsub_payload = _add_errors_to_input_data(
-        input_json, -1)
+      pubsub_payload = _add_errors_to_input_data(input_json, -1)
       _send_pubsub_message(project, full_path_topic, pubsub_payload)
-
       raise
+
 
 def main(argv: Sequence[str]) -> None:
   """Main function for testing using the command line.
@@ -618,8 +659,8 @@ def main(argv: Sequence[str]) -> None:
       None
   """
   data = {
-    "bucket": os.environ['DEFAULT_GCS_BUCKET'],
-    "name": argv[1]
+      'bucket': os.environ['INPUT_GCS_BUCKET'],
+      'name': argv[1]
     }
   file_slicer(data=data)
 
