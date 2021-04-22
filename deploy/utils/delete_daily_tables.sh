@@ -1,0 +1,1 @@
+sh delete_sharded_tables.sh massive_conversions_reporting daily_results_ -f
