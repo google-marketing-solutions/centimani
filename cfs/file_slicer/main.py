@@ -71,6 +71,14 @@ def _add_errors_to_input_data(data: Dict[str, Any],
 
 
 def _get_file_parameters(csv_line: str) -> Dict[str, Any]:
+  """Checks if the provided string contains the substring 'Parameters'.
+
+  Args:
+    csv_line (str): CSV line where the substring will be searched.
+
+  Returns:
+    An dictionary with either the line if found or empty otherwise
+  """
   if 'Parameters' in csv_line[0]:
     return csv_line
   else:
@@ -378,14 +386,14 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
       if num_rows == 1:
         extra_params = _get_file_parameters(conversion_info)
         # No parameters line, first row is the header
-        if len(extra_params) == 0:
+        if not extra_params:
           header = conversion_info
         else:
           parent_numrows = parent_numrows -1
       else:
         if num_rows == 2:
           # If parameters line was present, second row is header
-          if len(extra_params) > 0:
+          if extra_params:
             header = conversion_info
           else:  # else it's a conversion line
             chunk_buffer.append(conversion_info)
@@ -586,11 +594,12 @@ def file_slicer(data, context=Optional[Context]):
   del context  # Not used
   file_name = data['name']
   input_bucket = data['bucket']
-  if not all(elem in os.environ for elem in [
+  required_elem = [
       'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
       'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'SERVICE_ACCOUNT',
       'STORE_RESPONSE_STATS_TOPIC', 'OUTPUT_GCS_BUCKET'
-  ]):
+  ]
+  if not all(elem in os.environ for elem in required_elem):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
@@ -613,8 +622,9 @@ def file_slicer(data, context=Optional[Context]):
 
       target_platform = _get_target_platform(os.path.basename(file_name))
 
-      config = _read_platform_config_from_secret(project,
-                                                 f'{deployment_name}_{solution_prefix}_{target_platform}_config')
+      config = _read_platform_config_from_secret(
+          project,
+          f'{deployment_name}_{solution_prefix}_{target_platform}_config')
 
       max_chunk_lines = config['slicer']['max_chunk_lines']
       queue_config = _get_queue_config(client,

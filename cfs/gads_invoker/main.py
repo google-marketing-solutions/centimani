@@ -24,9 +24,8 @@ import logging
 import os
 import sys
 # import traceback
-from typing import Any, Dict, Sequence, Optional
+from typing import Any, Dict
 
-from absl import app
 from flask import Response
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
@@ -381,17 +380,16 @@ def _upload_conversions(input_json: Dict[str, Any],
     return 500
 
 
-def _print_errors(ex):
-  print(f'Request with ID "{ex.request_id}" failed with status '
-        f'"{ex.error.code().name}" and includes the following errors:')
-  for error in ex.failure.errors:
-    print(f'\tError with message "{error.message}".')
-    if error.location:
-      for field_path_element in error.location.field_path_elements:
-        print(f'\t\tOn field: {field_path_element.field_name}')
-
-
 def _send_pubsub_message(project_id, reporting_topic, pubsub_payload):
+  """Checks if a blob exists in Google Cloud Storage.
+
+  Args:
+    project_id: ID of the Google Cloud Project where the solution is deployed.
+    reporting_topic: Pub/Sub topic to use in the message to be sent.
+    pubsub_payload: Payload of the Pub/Sub message to be sent.
+  Returns:
+    None
+  """
   publisher = pubsub_v1.PublisherClient()
   topic_path_reporting = publisher.topic_path(project_id, reporting_topic)
   publisher.publish(
@@ -591,12 +589,12 @@ def gads_invoker(request):
         `make_response
         <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
   """
-  if not all(elem in os.environ for elem in [
+  required_elem = [
       'OUTPUT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
       'STORE_RESPONSE_STATS_TOPIC', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX',
       'CACHE_TTL_IN_HOURS'
-
-  ]):
+  ]
+  if not all(elem in os.environ for elem in required_elem):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
@@ -643,25 +641,25 @@ def gads_invoker(request):
     return Response('', 500)
 
 
-def main(argv: Optional[Sequence[str]]) -> None:
+def  _test_main() -> None:
   """Main function for testing using the command line.
 
   Args:
-      argv (typing.Sequence): argument list
+    None
 
   Returns:
-      None
+    None
   """
   # Replace with your testing JSON
-  input_string = (' {"date": "20210415", '
+  input_string = (' {"date": "YYYYMMDD", '
     '"target_platform": "gads",'
     '"extra_parameters": ["Parameters:TimeZone=Europe/Madrid", "", "", "", ""],'
-    '"parent": {"cid": "6849178819", "file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv",'
+    '"parent": {"cid": "XXXXXXXXXX", "file_name": "GADS_XX_AAA-BBB-CCCC_DDD-EEE-FFFF_GGG-HHH-III_YYYYMMDD_1.csv",'
     '"file_path": "input",'
-    '"file_date": "20210415",'
+    '"file_date": "YYYYMMDD",'
     '"total_files": 100,'
     '"total_rows": 25000},'
-    '"child": {"file_name": "GADS_EG_633-087-7141_114-712-1970_114-712-1970_20210322_1.csv---3",'
+    '"child": {"file_name": "GADS_XX_AAA-BBB-CCCC_DDD-EEE-FFFF_GGG-HHH-III_YYYYMMDD_1.csv---3",'
     '"num_rows": 250}}')
 
   input_json = json.loads(input_string)
@@ -702,4 +700,4 @@ def main(argv: Optional[Sequence[str]]) -> None:
     raise
 
 if __name__ == '__main__':
-  app.run(main)
+  _test_main()

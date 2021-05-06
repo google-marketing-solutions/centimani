@@ -20,4 +20,3 @@ google-cloud-firestore
 google-cloud-datastore
 pandas
 pyarrow
-

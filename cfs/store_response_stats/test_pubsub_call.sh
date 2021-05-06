@@ -29,9 +29,3 @@ gcloud pubsub topics publish "$TOPIC_NAME" \
   --message '{
    "test":"test"
 }'
-
-
-
-
-
-

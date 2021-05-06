@@ -15,8 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-
 CONFIG_PATH="../../deploy/config.yaml"
 HELPERS_PATH="../../deploy/helpers.sh"
 MEMORY="512MB"
@@ -47,8 +45,4 @@ gcloud functions deploy "$DEPLOYMENT_NAME""_""$SOLUTION_PREFIX""_gads_invoker" \
    --no-allow-unauthenticated \
    --format "none"
 
-
 rm ./__config.yaml
-
-
-

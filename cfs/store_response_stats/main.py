@@ -1,4 +1,4 @@
-"""Google Cloud function that process the GADS conv. upload response"""
+"""Google Cloud function that processes the stores API responses."""
 
 # Copyright 2020 Google LLC
 #
@@ -16,34 +16,31 @@
 #
 # -*- coding: utf-8 -*-
 
-import time
 import base64
 import datetime
 import json
 import os
-import re
-import sys
-import uuid
-# import pandas as pd
-# import numpy as np
-
+import time
 from typing import Any, Dict, Optional
-from google.cloud.functions_v1.context import Context
-from google.cloud import pubsub_v1 as pubsub
+
 from google.cloud import datastore as store
+from google.cloud.functions_v1.context import Context
 import pytz
 
 DEFAULT_GCP_PROJECT = os.getenv("DEFAULT_GCP_PROJECT", "")
 MAX_RETRIES = 3
 SLEEP_IN_SECONDS = 5
 
+
 def _upsert_processing_date_in_datastore(db: store.client.Client,
                                          data: Dict[str, Any]) -> store.key.Key:
-  """Creates/updates the date entity
+  """Creates/updates the date entity.
 
   Args:
-    db:  Datastore client
-    data: a dictionary containing the information to store in Datastore
+    db: Datastore client.
+    data: a dictionary containing the information to store in Datastore.
+  Returns:
+    A datastore key for the processing date
   """
 
   date_key = db.key("processing_date", data["processing_date"])
@@ -54,20 +51,23 @@ def _upsert_processing_date_in_datastore(db: store.client.Client,
 
   return date_key
 
+
 def _upsert_child_file_in_datastore(
     db: store.client.Client, data: Dict[str, Any],
     parent_key: store.key.Key) -> store.key.Key:
-  """Create and initialises the chile file datastore structure
+  """Create and initialises the chile file datastore structure.
 
   Args:
-    db:  Datastore client
-    data: a dictionary containing the information to store in Datastore
-    date_key: the key of the date
+    db:  Datastore client.
+    data: a dictionary containing the information to store in Datastore.
+    parent_key: key at the parent level.
+  Returns:
+    A datastore key pointing at the child structure
   """
   with db.transaction():
     child_key = db.key("child_file",
-                        data["child_file_name"],
-                        parent=parent_key)
+                       data["child_file_name"],
+                       parent=parent_key)
     child_file = store.Entity(key=child_key)
     child_file.update(data)
     db.put(child_file)
@@ -76,11 +76,13 @@ def _upsert_child_file_in_datastore(
 
 
 def _insert_data_in_datastore(db: store.Client, data: Dict[str, Any]):
-  """Create and initialises the datastore structure
+  """Create and initialises the datastore structure.
 
   Args:
-    db:  Datastore client
-    data: a dictionary containing the information to store in Datastore
+    db:  Datastore client.
+    data: a dictionary containing the information to store in Datastore.
+  Returns:
+    None
   """
 
   for i in range(MAX_RETRIES):
@@ -92,6 +94,7 @@ def _insert_data_in_datastore(db: store.Client, data: Dict[str, Any]):
       print(e)
       time.sleep(SLEEP_IN_SECONDS)
 
+
 def _build_data_for_store(data: Dict[str, Any]) -> Dict[str, Any]:
 
   child_errors = {}
@@ -100,19 +103,19 @@ def _build_data_for_store(data: Dict[str, Any]) -> Dict[str, Any]:
     child_errors = data["child"]["errors"]
 
   return {
-    "cid": data["parent"]["cid"],
-    "processing_date": data["date"],
-    "target_platform": data["target_platform"],
-    "parent_file_name": data["parent"]["file_name"],
-    "parent_file_path": data["parent"]["file_path"],
-    "parent_file_date": data["parent"]["file_date"],
-    "parent_total_files": data["parent"]["total_files"],
-    "parent_total_rows": data["parent"]["total_rows"],
-    "child_file_name": data["child"]["file_name"],
-    "child_num_rows": data["child"]["num_rows"],
-    "child_num_errors": data["child"]["num_errors"],
-    "child_errors": child_errors,
-    "last_processed_timestamp": datetime.datetime.now(pytz.utc)
+      "cid": data["parent"]["cid"],
+      "processing_date": data["date"],
+      "target_platform": data["target_platform"],
+      "parent_file_name": data["parent"]["file_name"],
+      "parent_file_path": data["parent"]["file_path"],
+      "parent_file_date": data["parent"]["file_date"],
+      "parent_total_files": data["parent"]["total_files"],
+      "parent_total_rows": data["parent"]["total_rows"],
+      "child_file_name": data["child"]["file_name"],
+      "child_num_rows": data["child"]["num_rows"],
+      "child_num_errors": data["child"]["num_errors"],
+      "child_errors": child_errors,
+      "last_processed_timestamp": datetime.datetime.now(pytz.utc)
     }
 
 
@@ -132,40 +135,45 @@ def main(event: Dict[str, Any], context=Optional[Context]):
   data = base64.b64decode(event["data"])
   input_data = json.loads(data)
   db = store.Client(DEFAULT_GCP_PROJECT)
-  _insert_data_in_datastore(db,
-    _build_data_for_store(input_data)
-  )
+  _insert_data_in_datastore(db, _build_data_for_store(input_data))
 
 
 def _test_main():
+  """Function provided for functionality testing from the command line.
+
+  Args:
+    None
+  Returns:
+    None
+  """
   data = {
-    "date":"20210420",
-    "target_platform":"gads",
-    "extra_parameters":[
-        "Parameters:TimeZone=Europe/Madrid",
-        "",
-        "",
-        "",
-        ""
-    ],
-    "parent":{
-        "cid":"1234",
-        "file_name":"file.csv",
-        "file_path":"input",
-        "file_date":"20210420",
-        "total_files":100,
-        "total_rows":25000
-    },
-    "child":{
-        "file_name":"file.csv---1",
-        "num_rows":250,
-        "num_errors":48,
-        "errors":[{
-            "code": "conversion_upload_error: UNAUTHORIZED_CUSTOMER",
-            "message":"Click owned by a non managed account.",
-            "count":48
+      "date": "YYYYMMDD",
+      "target_platform": "gads",
+      "extra_parameters": [
+          "Parameters:TimeZone=Europe/Madrid",
+          "",
+          "",
+          "",
+          ""
+      ],
+      "parent": {
+          "cid": "1234",
+          "file_name": "file.csv",
+          "file_path": "input",
+          "file_date": "20210420",
+          "total_files": 100,
+          "total_rows": 25000
+      },
+      "child": {
+          "file_name": "file.csv---1",
+          "num_rows": 250,
+          "num_errors": 48,
+          "errors": [{
+              "code": "conversion_upload_error: UNAUTHORIZED_CUSTOMER",
+              "message": "Click owned by a non managed account.",
+              "count": 48
           }]
-    }
+      }
   }
 
   main(

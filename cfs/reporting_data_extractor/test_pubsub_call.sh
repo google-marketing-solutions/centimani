@@ -15,7 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 CONFIG_PATH="../../deploy/config.yaml"
 HELPERS_PATH="../../deploy/helpers.sh"
 
@@ -27,9 +26,3 @@ TOPIC_NAME="$REPORTING_DATA_EXTRACTOR_TOPIC"
 gcloud config set project "$DEFAULT_GCP_PROJECT"
 gcloud pubsub topics publish "$TOPIC_NAME" \
   --message '{}'
-
-
-
-
-
-

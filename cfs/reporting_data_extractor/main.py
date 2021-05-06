@@ -39,6 +39,7 @@ def _get_data_from_datastore(current_date: str) -> pd.DataFrame:
   Args:
     current_date:  string representing the current date in YYYYMMDD format
   Returns:
+    A dataframe containing all data extracted from Datastore
   """
 
   db = store.Client(DEFAULT_GCP_PROJECT)
@@ -75,6 +76,13 @@ def _write_to_bigquery(df: pd.DataFrame, table_name: str):
 
 
 def _get_bq_schema():
+  """Returns the schema of the BigQuery table used by the solution.
+
+  Args:
+    None
+  Returns:
+    A list of BigQuery fields.
+  """
   return [
       bigquery.SchemaField(name="cid", field_type="STRING", mode="REQUIRED"),
       bigquery.SchemaField(
@@ -140,13 +148,27 @@ def main(event: Dict[str, Any], context=Optional[Context]):
 
 
 def _test_main():
+  """Function for optional testing of the main function from the command line.
+
+  Args:
+    None.
+  Returns:
+    None
+  """
   data = {}
   main(
       event={"data": base64.b64encode(bytes(json.dumps(data).encode("utf-8")))})
 
 
 def _test_get_data_from_datastore():
-  date = "20210316"
+  """Used for testing data extraction from Datastore using the command line.
+
+  Args:
+    None.
+  Returns:
+    None
+  """
+  date = "YYYYMMDD"
   table_name = f"{DEFAULT_GCP_PROJECT}.{BQ_REPORTING_DATASET}.{BQ_REPORTING_TABLE}_{date}"
   df = _get_data_from_datastore(date)
 
