@@ -17,31 +17,31 @@
 
 # General settings
 # =====================================================================
-DEPLOYMENT_NAME: 'ego_cogito'
-SOLUTION_PREFIX: 'massive_conv_uploader'
+DEPLOYMENT_NAME: 'my_deployment'
+SOLUTION_PREFIX: 'centimani'
 # Service account for the deployment. It must be granted in all the GCP projects used
-SERVICE_ACCOUNT: 'mcu-sa@egoconv.iam.gserviceaccount.com'
+SERVICE_ACCOUNT: 'xxxx-sa@yyyy.iam.gserviceaccount.com'
 # Project for pub/sub & firestore
-DEFAULT_GCP_PROJECT: 'egoconv'
+DEFAULT_GCP_PROJECT: 'some_project'
 # Type gcloud compute regions list to find out the different values
-DEFAULT_GCP_REGION: 'europe-west1'
+DEFAULT_GCP_REGION: 'some_region'
 
 
 # GCS settings
 # =====================================================================
-OUTPUT_GCS_BUCKET: 'ego_conversions_import_output'
-INPUT_GCS_BUCKET: 'ego_conversions_import_input'
+INPUT_GCS_BUCKET: 'some_bucket_for_input'
+OUTPUT_GCS_BUCKET: 'some_bucket_for_output'
 
 # BQ settings
 # =====================================================================
 SKIP_DATASET_CREATION: 'N'
-BQ_REPORTING_DATASET: 'massive_conversions_reporting'
+BQ_REPORTING_DATASET: 'centimani_reporting'
 BQ_REPORTING_TABLE: 'daily_results'
-BQ_GCP_BROAD_REGION: 'EU'
+BQ_GCP_BROAD_REGION: 'some_broad_region'
 
 # Polling & throttling settings
 # =====================================================================
-TIMEZONE: 'Europe/Madrid'
+TIMEZONE: 'your_timezone'
 REPORTING_DATA_POLLING_CONFIG: '\*/5 \* \* \* \*'
 
 
