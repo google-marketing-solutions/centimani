@@ -13,67 +13,36 @@ In its vanilla version, Centimani is equipped with a Google Ads offline conversi
 Here’s the list of files included as part of the solution:
 
 ├── cfs
-
 │   ├── file_slicer
-
 │   │   ├── deploy.sh
-
 │   │   ├── main.py
-
 │   │   ├── requirements.txt
-
 │   │   └── test_main.sh
-
 │   ├── gads_invoker
-
 │   │   ├── deploy.sh
-
 │   │   ├── main copy.py
-
 │   │   ├── main.py
-
 │   │   ├── requirements.txt
-
 │   │   └── test_main.sh
-
 │   ├── reporting_data_extractor
-
 │   │   ├── deploy.sh
-
 │   │   ├── main.py
-
 │   │   ├── requirements.txt
-
 │   │   ├── test_main.sh
-
 │   └── store_response_stats
-
 │       ├── deploy.sh
-
 │       ├── main.py
-
 │       ├── requirements.txt
-
 │       ├── test_main.sh
-
 ├── deploy
-
 │   ├── config.yaml
-
 │   ├── deploy.sh
-
 │   ├── env.sh
-
 │   ├── gads_config.json
-
 │   ├── helpers.sh
-
 │   └── utils
-
 │       ├── delete_daily_tables.sh
-
 │       └── delete_sharded_tables.sh
-
 └── README.md
 
 
@@ -87,44 +56,20 @@ Here’s the list of files included as part of the solution:
 
 
     GCS Input Bucket
-
-
        |
-
-
        \-------------------> input (for file_slicer to read files from)
 
 
     GCS Output Bucket
-
-
        |
-
-
        |-------------------> <date>/failed (for failed input files: name error, corrupted…)
-
-
        |
-
-
        |-------------------> <date>/processed (for files successfully sliced)
-
-
        |
-
-
        |-------------------> <date>/slices_processing (for slices to be picked by the invoker)
-
-
        |
-
-
        |-------------------> <date>/slices_processed (for slices successfully processed)
-
-
        |
-
-
        \-------------------> <date>/slices_failed (for slices with processing errors)
 
 
@@ -141,7 +86,7 @@ Part description:
 
 
 1. \<platform uppercase >: the name of the platform
-2. \<free text no underscore allowed >: use these fields to describe the purpose of the file or add any additional information. You may include customer name, conversion name, etc. Please do not use underscores, since they are used as separators. 
+2. \<free text no underscore allowed >: use these fields to describe the purpose of the file or add any additional information. You may include customer name, conversion name, etc. Please do not use underscores, since they are used as separators.
 3. \<customer/account id>: identifier of the customer or account
 4. \<date> The date in YYYYMMDD format
 5. \<free text> any text
@@ -158,7 +103,7 @@ Examples:
 
 ## Generic Slice File Naming Convention
 
-The file slicer process will take the input file name and add 3 dashes (---) and the slice number as the suffix for the name for each generated slice: 
+The file slicer process will take the input file name and add 3 dashes (---) and the slice number as the suffix for the name for each generated slice:
 
 ```
 <platform uppercase>_<free text no underscore allowed>_<customer/account id>_<free text no underscore allowed>_<free text no underscore allowed>_<date>_<free text>
@@ -183,7 +128,7 @@ Part definition:
 
 
 
-1. \<free text no underscore allowed>: use these fields to describe the purpose of the file or add any additional information. You may include customer name, conversion name, etc. Please do not use underscores, since they are used as separators. 
+1. \<free text no underscore allowed>: use these fields to describe the purpose of the file or add any additional information. You may include customer name, conversion name, etc. Please do not use underscores, since they are used as separators.
 2. \<CID where conversions are observed>: the account where the cids are captured.
 3. \<MCC where developer token is defined>: the MCC account where we could find the developer token to be used.
 4. \<CID where conversions are defined>: the account where the conversion actions are defined.
@@ -199,14 +144,14 @@ GADS_MY-SOMETHING_000-000-0000_000-000-0000_000-000-0000_20210421_1.csv
 ## GAds Invoker Slice File Naming Convention
 
 
-[Same as Generic Input File Naming Convention](#generic-input-file-naming-convention) 
+[Same as Generic Input File Naming Convention](#generic-input-file-naming-convention)
 
 
 # Deploying the vanilla version
 
 
 
-*   Edit config.yaml inside the _deploy_ directory and configure your Solution and Cloud Project settings, using the first part of the file (up to the ‘DO NOT MODIFY’ line). 
+*   Edit config.yaml inside the _deploy_ directory and configure your Solution and Cloud Project settings, using the first part of the file (up to the ‘DO NOT MODIFY’ line).
 
     DEPLOYMENT_NAME & SOLUTION_PREFIX values will be used to build the name of every artifact, so no collision with other deployments may happen.
 
@@ -223,7 +168,7 @@ GADS_MY-SOMETHING_000-000-0000_000-000-0000_000-000-0000_20210421_1.csv
     SERVICE_ACCOUNT: the service account to use. It will be created if it does not exist. Add it without domain if you’re not sure of the domain name. It must be 6 to 30 char long.
 
 
-    `SERVICE_ACCOUNT: 'service-account-name-without-domain' (i.e mcu-123)`	
+    `SERVICE_ACCOUNT: 'service-account-name-without-domain' (i.e mcu-123)`
 
 
     DEFAULT_GCP_PROJECT & DEFAULT_GCP_REGION: are the name of your project and the corresponding region
@@ -240,7 +185,7 @@ GADS_MY-SOMETHING_000-000-0000_000-000-0000_000-000-0000_20210421_1.csv
     	SKIP_DATASET_CREATION: 'N'
     	BQ_REPORTING_DATASET: 'the-dataset-name'
     	BQ_REPORTING_TABLE: 'the-table-name'
-    	BQ_GCP_BROAD_REGION: 'EU' (allowed values here) 
+    	BQ_GCP_BROAD_REGION: 'EU' (allowed values here)
     	TIMEZONE: 'Europe/Madrid' (allowed values here)
 
     	REPORTING_DATA_POLLING_CONFIG: '\*/5 \* \* \* \*' (format explained here)
@@ -285,7 +230,25 @@ When configuring the settings, please take these tips into consideration:
 *   Delete the file \*_config.json after completing the deployment, in order to avoid making sensitive information available in your deployment system.
 
 
-# How to use it Centimani
+**Deploying Centimani components**
+
+Centimani uses a centralized deployment script which will deploy each of the components. In order to start the process,
+once the configuration file is ready, just run the deployment script using its relative path from the root folder of Centimani:
+
+```
+centimani$ bash deploy/deploy.sh
+```
+
+The deployment script will grant permissions, enable services and create all Google Cloud resources required for
+Centimani to run.
+
+Progress in displayed on the screen, so please take a look for any issues reported during the
+deployment process. You may re-run the script after fixing any reported issue in order to ensure a healthy installation
+of the solution.
+
+
+
+# How to use Centimani
 
 Centimani uses Cloud Tasks to parallelize up to thousands of API calls with small payloads, thus reducing the processing time for big input files. It uses Secret Manager to store all sensitive credentials and Datastore to keep an updated report on the progress of the data processing workflow. Finally, reporting status information is sent to BigQuery, so it can be analyzed and/or visualized.
 
@@ -304,14 +267,9 @@ Finally, it is possible to (optionally) set up Google Task Scheduler to periodic
 
 **GAds file naming convention**
 
-The provided Invoker module can upload offline click conversions in Google Ads, however it is possible to add any other functionality as described in “
+The provided Invoker module can upload offline click conversions in Google Ads, however it is possible to add any other functionality as described in “[how to extend the solution?](#how-to-extend-the-solution?)”
 
-[how to extend the solution?](#how-to-extend-the-solution?)” 
-
-Input files for Google Ads click conversion uploader must follow the 
-
-
-[GAds Invoker Input File Naming Convention](#gads-invoker-slice-file-naming-convention)
+Input files for Google Ads click conversion uploader must follow the [GAds Invoker Input File Naming Convention](#gads-invoker-slice-file-naming-convention)
 
 
 ```
@@ -336,10 +294,10 @@ The following query can be used to get a status report of the upload process:
           max(parent_total_files) as num_files,
           count(1) as processed_files,
           max(parent_total_rows) total_rows,
-          sum(child_num_rows) processed_rows,  
+          sum(child_num_rows) processed_rows,
           sum(child_num_errors) num_errors
         FROM `<project>.<dataset>.daily_results_*`
-        WHERE 
+        WHERE
           target_platform = '<PLATFORM>'
         GROUP BY
            parent_file_name,
@@ -358,11 +316,11 @@ A slightly modified version of this query can also be used to power a DataStudio
           max(parent_total_files) as num_files,
           count(1) as processed_files,
           max(parent_total_rows) total_rows,
-          sum(child_num_rows) processed_rows,  
+          sum(child_num_rows) processed_rows,
           SUM(child_num_errors) num_errors
         FROM `<project>.<dataset>.daily_results_*`
-        WHERE 
-          target_platform = '<PLATFORM>' AND 
+        WHERE
+          target_platform = '<PLATFORM>' AND
           _TABLE_SUFFIX BETWEEN @DS_START_DATE AND @DS_END_DATE
         GROUP BY
            parent_file_name,
@@ -458,17 +416,17 @@ Table daily_report_YYYYMMDD:
 
 
 
-*   parent_total_rows		INTEGER	REQUIRED	
-*   parent_total_files		INTEGER	REQUIRED	
-*   child_num_errors		INTEGER	REQUIRED	
-*   child_num_rows		INTEGER	REQUIRED	
-*   parent_file_path		STRING	REQUIRED	
-*   parent_file_name		STRING	REQUIRED	
-*   processing_date		STRING	REQUIRED	
-*   child_file_name		STRING	REQUIRED	
-*   target_platform		STRING	REQUIRED	
-*   last_processed_timestamp	TIMESTAMP	REQUIRED	
-*   parent_file_date		STRING	REQUIRED	
+*   parent_total_rows		INTEGER	REQUIRED
+*   parent_total_files		INTEGER	REQUIRED
+*   child_num_errors		INTEGER	REQUIRED
+*   child_num_rows		INTEGER	REQUIRED
+*   parent_file_path		STRING	REQUIRED
+*   parent_file_name		STRING	REQUIRED
+*   processing_date		STRING	REQUIRED
+*   child_file_name		STRING	REQUIRED
+*   target_platform		STRING	REQUIRED
+*   last_processed_timestamp	TIMESTAMP	REQUIRED
+*   parent_file_date		STRING	REQUIRED
 *   cid				STRING	REQUIRED
 *   child_errors			RECORD	REPEATED
 *   child_errors.code		STRING	REQUIRED
@@ -489,7 +447,7 @@ Therefore you will need to:
     *   Rename it to **<platform name in lowercase>_invoker_** (in concordance with _deploy/config.yaml_)
     *   Change the following variable in **<platform name in lowercase>_invoker/deploy.sh_** :
 
-         
+
 
 
             CF_NAME=$CF_NAME_<platform name in uppercase>_INVOKER
@@ -564,7 +522,7 @@ Therefore you will need to:
 *   In BigQuery I find more slices and with a different num of rows than than configured.
     *   Have you changed the slicing parameters and reprocessed the file on the same day? If so, it’s normal. Clean the entries for that file in BigQuery and reprocess it.
 *   File slicing phase takes too long.
-    *   Consider uploading smaller files, or creating bigger chunks. (The benchmark we have for GAds conversion upload is 100 input files with 25K records each, split into 50 record files, taking less than 1 hour end to end processing time) 
+    *   Consider uploading smaller files, or creating bigger chunks. (The benchmark we have for GAds conversion upload is 100 input files with 25K records each, split into 50 record files, taking less than 1 hour end to end processing time)
     *   Consider increasing the allocated memory for the Cloud Function to 2GB (you can do it in _cfs/file_slicer/deploy.sh_)
 *   The invoker does not seem to work properly.
     *   Check the Cloud Function logs and make sure that you are not running out of memory (due to the size of the data in Datastore, for example) and the API invocations and returns are working properly.
