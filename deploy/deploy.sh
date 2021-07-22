@@ -84,6 +84,7 @@ function enable_services {
   gcloud services enable \
     compute.googleapis.com \
     appengine.googleapis.com \
+    datastore.googleapis.com \
     cloudbuild.googleapis.com \
     pubsub.googleapis.com \
     cloudfunctions.googleapis.com \
