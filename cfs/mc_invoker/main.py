@@ -1,4 +1,4 @@
-"""Google Cloud function that uploads the chunk of conversions to Google Ads."""
+"""Google Cloud function that uploads chunk of products to the Content API."""
 
 # Copyright 2020 Google LLC
 #
@@ -140,7 +140,7 @@ def _count_partial_errors(response: str):
       An integer representing the total number of partial errors in the response
       failure error.
       A list containing the code, message and number of times that each unique
-      error code was returned by the API for one of the conversions uploaded.
+      error code was returned by the API for one of the products uploaded.
   """
 
   error_count = 0
@@ -229,6 +229,33 @@ def _read_csv_from_blob(bucket_name: str,
   return csv.reader(io.StringIO(decoded_blob), delimiter=delimiter)
 
 
+def _read_json_from_blob(bucket_name: str, blob_name: str):
+  """Function to read a blob containing a json file and return it as a list.
+
+  Args:
+    bucket_name: The name of the source bucket.
+    blob_name: The name of the file to move.
+
+  Returns:
+    A list of objects extracted from the file.
+  """
+  products = []
+  storage_client = storage.Client()
+  print('Reading {} from {}'.format(blob_name, bucket_name))
+  bucket = storage_client.get_bucket(bucket_name)
+  blob = bucket.blob(blob_name)
+  downloaded_blob = blob.download_as_string()
+  decoded_blob = downloaded_blob.decode('utf-8')
+  lines = decoded_blob.split('\n')
+  for line in lines:
+    if line:
+      # Remove BOM if present
+      line = line.replace('\ufeff', '')
+      product = json.loads(line)
+      products.append(product)
+  return products
+
+
 def _mv_blob(bucket_name, blob_name, new_bucket_name, new_blob_name):
   """Function for moving files between directories or buckets in GCP.
 
@@ -279,7 +306,7 @@ def _mv_blob_if_last_try(task_retries, max_attempts, input_json, bucket_name):
 def _upload_products(service: discovery.Resource, env_info: Dict[str, Any],
                      job_info: Dict[str, Any], products, task_retries: int,
                      full_chunk_path: str):
-  """Loads a chunk of products from GCS and sends it to the Google Ads API.
+  """Loads a chunk of products from GCS and sends it to the Content API.
 
   Args:
     service: Initialized service of a Content API client.
@@ -296,8 +323,9 @@ def _upload_products(service: discovery.Resource, env_info: Dict[str, Any],
 
   try:
     response = None
-    if job_info['operation'] == 'insert':
-      response = _insert_products_in_batch(service, job_info, products)
+
+    if job_info['operation'] in ['insert', 'delete', 'direct']:
+      response = _send_products_in_batch(service, job_info, products)
     else:
       raise Exception(f'Invalid operation found: {job_info["operation"]}.')
     if response:
@@ -350,13 +378,17 @@ def _build_products(raw_products: List[List[str]], job_info: Dict[str, Any]):
   products = []
   for raw_product in raw_products:
     raw_product = [x.strip() for x in raw_product]
-    product = _build_product(raw_product, fields, job_info)
-    products.append(product)
+    if (job_info['operation'] == 'delete'):
+      product = _build_product_for_deletion(raw_product, fields, job_info)
+    else:
+      product = _build_product_for_insertion(raw_product, fields, job_info)
+    if product:
+      products.append(product)
   return products
 
 
-def _build_product(raw_product: List[str], fields: List[str],
-                   job_info: Dict[str, Any]):
+def _build_product_for_insertion(raw_product: List[str], fields: List[str],
+                                 job_info: Dict[str, Any]):
   """Builds a single product object from the raw data provided in the CSV file.
 
   Args:
@@ -429,6 +461,35 @@ def _build_product(raw_product: List[str], fields: List[str],
               'value': values[0],
               'unit': unit
           }
+
+  return product
+
+
+def _build_product_for_deletion(raw_product: List[str], fields: List[str],
+                                job_info: Dict[str, Any]):
+  """Builds a single product object from the raw data provided in the CSV file.
+
+  Args:
+    raw_product: Products read from the CSV file.
+    fields: A list with the fields' names from the header of the CSV file.
+    job_info: Job configuration derived from the input_json object.
+
+  Returns:
+    An individual product prepared to be uploaded.
+  """
+  product = {}
+
+  if 'product_id' in fields:
+    product['productId'] = raw_product[fields.index('product_id')]
+  elif 'productId' in fields:
+    product['productId'] = raw_product[fields.index('productId')]
+  elif 'id' in fields:
+    product['productId'] = (f'{job_info["channel"]}'
+                            f':{job_info["content_language"]}'
+                            f':{job_info["target_country"]}'
+                            f':{raw_product[fields.index("id")]}')
+  else:
+    print('Invalid product received for deletion. No product_id or id found.')
 
   return product
 
@@ -515,8 +576,15 @@ def _mc_invoker_worker(service: discovery.Resource, env_info: Dict[str, Any],
                                          chunk_filename)
 
   if full_chunk_name:
-    raw_products = _read_csv_from_blob(env_info[BUCKET_NAME], full_chunk_name)
-    ready_products = _build_products(raw_products, job_info)
+    allowed_file_check = re.match('.*\\.(csv|json)[-0-9]+$', full_chunk_name)
+  if full_chunk_name and allowed_file_check:
+    extension = allowed_file_check.group(1)
+    if extension == 'csv':
+      raw_products = _read_csv_from_blob(env_info[BUCKET_NAME], full_chunk_name)
+      ready_products = _build_products(raw_products, job_info)
+    else:
+      ready_products = _read_json_from_blob(env_info[BUCKET_NAME],
+                                            full_chunk_name)
     result = _upload_products(
         service,
         env_info,
@@ -644,10 +712,10 @@ def initialize_service(auth_config):
   return service
 
 
-def _insert_products_in_batch(service: discovery.Resource, job_info: Dict[str,
-                                                                          Any],
-                              products: List[Dict[str, Any]]):
-  """Inserts products using batches through the Content API.
+def _send_products_in_batch(service: discovery.Resource, job_info: Dict[str,
+                                                                        Any],
+                            products: List[Dict[str, Any]]):
+  """Sends products using batches through the Content API.
 
   Args:
     service: Initialized service of a Content API client.
@@ -661,17 +729,21 @@ def _insert_products_in_batch(service: discovery.Resource, job_info: Dict[str,
 
   batch = {'entries': []}
   counter = 0
-  for product in products:
-
-    counter += 1
-    entry = {
-        'batchId': counter,
-        'merchantId': merchant_id,
-        'method': 'insert',
-        'product': product,
-    }
-    batch['entries'].append(entry)
-
+  if job_info['operation'] == 'direct':
+    batch['entries'] = products
+  else:
+    for product in products:
+      counter += 1
+      entry = {
+          'batchId': counter,
+          'merchantId': merchant_id,
+          'method': job_info['operation'],
+      }
+      if job_info['operation'] == 'delete':
+        entry['productId'] = product['productId']
+      else:
+        entry['product'] = product
+      batch['entries'].append(entry)
   request = service.products().custombatch(body=batch)
   response = request.execute()
 

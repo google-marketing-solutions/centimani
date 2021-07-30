@@ -1,7 +1,6 @@
-absl-py
-functions-framework
-google-cloud-storage
-google-cloud-tasks
-google-cloud-secret-manager
-google-cloud-pubsub
-
+absl-py==0.13.0
+functions-framework==2.2.1
+google-cloud-storage==1.41.1
+google-cloud-tasks==2.5.1
+google-cloud-secret-manager==2.6.0
+google-cloud-pubsub==2.7.0

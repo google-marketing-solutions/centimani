@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-absl-py
-flask
-google-ads
-google-cloud-storage
-google-cloud-pubsub
-google-cloud-secret-manager
-google-cloud-datastore
+absl-py==0.13.0
+flask==2.0.1
+google-ads==13.0.0
+google-cloud-storage==1.41.1
+google-cloud-pubsub==2.7.0
+google-cloud-secret-manager==2.6.0
+google-cloud-datastore==2.1.4

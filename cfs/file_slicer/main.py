@@ -27,7 +27,7 @@ import os
 import random
 import string
 import sys
-from typing import Any, Dict, Sequence, Optional
+from typing import Any, Dict, Sequence, Optional, Tuple
 
 from absl import app
 from google.api_core.exceptions import NotFound
@@ -85,8 +85,8 @@ def _get_file_parameters(csv_line: str) -> Dict[str, Any]:
     return []
 
 
-def _upsert_queue(client: tasks_v2.CloudTasksClient,
-                  queue_config: Dict[str, Any]):
+def _upsert_queue(client: tasks_v2.CloudTasksClient, queue_config: Dict[str,
+                                                                        Any]):
   """Returns an instance of a Cloud Tasks queue as per the provided config.
 
   Args:
@@ -113,9 +113,7 @@ def _upsert_queue(client: tasks_v2.CloudTasksClient,
     })
 
   else:
-    queue = client.update_queue(request={
-        'queue': queue_config
-    })
+    queue = client.update_queue(request={'queue': queue_config})
 
   return queue
 
@@ -167,7 +165,7 @@ def _create_new_task(client, queue, project, location, parent_cid,
                      parent_numrows, child_filename, child_numrows, parent_date,
                      processing_date, url, extra_parameters, service_account,
                      target_platform):
-  """Creates a new task in Cloud Tasks to process a chunk of conversions.
+  """Creates a new task in Cloud Tasks to process a chunk of entries.
 
   Args:
     client: the cloud taks client
@@ -193,10 +191,8 @@ def _create_new_task(client, queue, project, location, parent_cid,
   """
   task_id = f'{os.path.basename(child_filename)}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}'
   task_id = hashlib.md5(task_id.encode('utf-8')).hexdigest()
-  task_name = client.task_path(project,
-                               location,
-                               queue.name.split('/')[-1],
-                               task_id)
+  task_name = client.task_path(project, location,
+                               queue.name.split('/')[-1], task_id)
   # Construct the request body.
   task = {
       'name': task_name,
@@ -251,14 +247,15 @@ def _create_new_task(client, queue, project, location, parent_cid,
   # print('Created task {}'.format(response.name))
 
 
-def _write_chunk_to_blob(storage_client, bucket_name, blob_name, data):
+def _write_chunk_to_blob(storage_client, bucket_name, blob_name, data, is_csv):
   """Function to write a list of strings into a blob within a GCS bucket.
 
   Args:
-    storage_client: Google Cloud Storage client
-    bucket_name (string): name of the source bucket
-    blob_name (string): name of the blob to create
-    data (list): list of strings to be written to the blob
+    storage_client: Google Cloud Storage client.
+    bucket_name (string): name of the source bucket.
+    blob_name (string): name of the blob to create.
+    data (list): list of strings to be written to the blob.
+    is_csv (boolean): indicates if the file is a CSV.
 
   Returns:
       None
@@ -267,16 +264,19 @@ def _write_chunk_to_blob(storage_client, bucket_name, blob_name, data):
   random_filename = '/tmp/' + ''.join(
       random.choice(string.ascii_lowercase) for i in range(16)) + '.csv'
   with open(random_filename, 'w') as f:
-    writer = csv.writer(f)
-    writer.writerows(data)
+    if is_csv:
+      writer = csv.writer(f)
+      writer.writerows(data)
+    else:
+      f.writelines(data)
   bucket = storage_client.get_bucket(bucket_name)
   blob = bucket.blob(blob_name)
   blob.upload_from_filename(random_filename)
   # print('Wrote chunk to file {}'.format(blob_name))
 
 
-def _read_csv_from_blob(storage_client, bucket_name, blob_name):
-  """Function to read a blob containing a CSV file and return it as an array.
+def _read_file_from_blob(storage_client, bucket_name, blob_name):
+  """Function to read a blob containing a file and return it a decoded blob.
 
   Args:
     storage_client: Google Cloud Storage client
@@ -284,7 +284,7 @@ def _read_csv_from_blob(storage_client, bucket_name, blob_name):
     blob_name (string): name of the file to move
 
   Returns:
-    Decoded blob with the contents of the file
+    Decoded blob with the contents of the file.
   """
   storage_client = storage.Client()
   bucket = storage_client.get_bucket(bucket_name)
@@ -321,8 +321,8 @@ def _mv_blob(storage_client, bucket_name, blob_name, new_bucket_name,
 
 
 def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
-                        output_bucket_name, max_chunk_lines, project,
-                        location, queue_config, invoker_url, service_account,
+                        output_bucket_name, max_chunk_lines, project, location,
+                        queue_config, invoker_url, service_account,
                         target_platform):
   """Splits a file into smaller chunks with a specific number of lines.
 
@@ -336,7 +336,7 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
       project (string): name of the GCP project
       location (string): location of the GCP project
       queue_config (Dict[str, Any]): name of the Cloud Tasks queue to use
-      invoker_url (string): full url to the gAds Invoker Cloud Function
+      invoker_url (string): full url to the Invoker Cloud Function
       service_account (string): represents the SA for authentication
       target_platform (string): the platform to send the tasks to
 
@@ -356,15 +356,21 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
 
   parent_cid, parent_date = _extract_info_from_filename(parent_filename)
 
-  # Load file in memory, read line by line and create chunks of a specific size
-  conversions_blob = _read_csv_from_blob(storage_client, input_bucket_name,
-                                         file_name)
-  # print('Conversions blob: {}'.format(conversions_blob))
-  conversions_list = csv.reader(io.StringIO(conversions_blob))
-  # print('Conversions list: {}'.format(conversions_list))
-  parent_numrows = sum(1 for row in conversions_list) -1
-  # print('Parent_numrows is {}'.format(parent_numrows))
-  conversions_list = csv.reader(io.StringIO(conversions_blob))
+  is_csv = file_name.endswith('.csv')
+
+  entries_blob = _read_file_from_blob(storage_client, input_bucket_name,
+                                      file_name)
+
+  if is_csv:
+    # Load file in memory, read line by line and create chunks of specific size.
+    entries_list = csv.reader(io.StringIO(entries_blob))
+    parent_numrows = sum(1 for row in entries_list) - 1
+    entries_list = csv.reader(io.StringIO(entries_blob))
+  else:
+    # Not a CSV file.
+    entries_list = io.StringIO(entries_blob)
+    parent_numrows = sum(1 for row in entries_list) - 1
+    entries_list = io.StringIO(entries_blob)
 
   num_rows = 0
   num_chunks = 0
@@ -374,43 +380,49 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
   chunk_lines = 0
   parent_numchunks = None
 
-  for conversion_info in conversions_list:
+  for entry_info in entries_list:
     num_rows = num_rows + 1
 
     if num_rows > 2:
-      chunk_buffer.append(conversion_info)
+      chunk_buffer.append(entry_info)
       chunk_lines += 1
       if not parent_numchunks:
         parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
     else:
       if num_rows == 1:
-        extra_params = _get_file_parameters(conversion_info)
-        # No parameters line, first row is the header
+        extra_params = _get_file_parameters(entry_info)
+        # No parameters line, first row is the header.
         if not extra_params:
-          header = conversion_info
+          if is_csv:
+            # The header is only processed for CSV files.
+            header = entry_info
+          else:
+            chunk_buffer.append(entry_info)
+            chunk_lines += 1
         else:
-          parent_numrows = parent_numrows -1
+          parent_numrows = parent_numrows - 1
       else:
         if num_rows == 2:
-          # If parameters line was present, second row is header
-          if extra_params:
-            header = conversion_info
-          else:  # else it's a conversion line
-            chunk_buffer.append(conversion_info)
+          # If parameters line was present, second row is header if CSV file.
+          if extra_params and is_csv:
+            header = entry_info
+          else:  # Else it's a data line or not a CSV file.
+            chunk_buffer.append(entry_info)
             chunk_lines += 1
 
     if (chunk_lines > 0) and (chunk_lines % max_chunk_lines == 0):
       num_chunks = num_chunks + 1
       child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
       child_numrows = len(chunk_buffer)
-      chunk_buffer.insert(0, header)
+      if is_csv:
+        chunk_buffer.insert(0, header)
       _write_chunk_to_blob(storage_client, output_bucket_name, child_filename,
-                           chunk_buffer)
+                           chunk_buffer, is_csv)
       _create_new_task(client, queue, project, location, parent_cid,
                        parent_filename, parent_filepath, parent_numchunks,
                        parent_numrows, child_filename, child_numrows,
-                       parent_date, processing_date, invoker_url,
-                       extra_params, service_account, target_platform)
+                       parent_date, processing_date, invoker_url, extra_params,
+                       service_account, target_platform)
       chunk_lines = 0
       chunk_buffer = []
 
@@ -418,14 +430,15 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
     num_chunks = num_chunks + 1
     child_filename = f'{processing_date}/slices_processing/{parent_filename}---{format(num_chunks)}'
     child_numrows = len(chunk_buffer)
-    chunk_buffer.insert(0, header)
+    if is_csv:
+      chunk_buffer.insert(0, header)
     _write_chunk_to_blob(storage_client, output_bucket_name, child_filename,
-                         chunk_buffer)
+                         chunk_buffer, is_csv)
     _create_new_task(client, queue, project, location, parent_cid,
                      parent_filename, parent_filepath, parent_numchunks,
                      parent_numrows, child_filename, child_numrows, parent_date,
-                     processing_date, invoker_url,
-                     extra_params, service_account, target_platform)
+                     processing_date, invoker_url, extra_params,
+                     service_account, target_platform)
 
   print('Wrote %s chunks for %s' %
         (format(num_chunks), format(parent_filename)))
@@ -435,7 +448,7 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
            new_file_name)
 
 
-def _extract_info_from_filename(filename: str) -> (str, str):
+def _extract_info_from_filename(filename: str) -> Tuple[str, str]:
   """Extracts the parent cid and date from file name.
 
     File format is as follows:
@@ -457,9 +470,7 @@ def _extract_info_from_filename(filename: str) -> (str, str):
   if len(arr) < 6:
     raise Exception('File name format is not correct')
 
-  return (arr[2].replace('-', ''),
-          arr[5].replace('-', '')
-          )
+  return (arr[2].replace('-', ''), arr[5].replace('-', ''))
 
 
 def _get_target_platform(file_name: str) -> str:
@@ -476,12 +487,8 @@ def _get_target_platform(file_name: str) -> str:
   return file_name.split('_')[0].lower()
 
 
-def _get_invoker_url(platform: str,
-                     location: str,
-                     project: str,
-                     deployment_name: str,
-                     solution_prefix: str) -> str:
-
+def _get_invoker_url(platform: str, location: str, project: str,
+                     deployment_name: str, solution_prefix: str) -> str:
   """Returns the url to invoke the cloud function for the specific platform.
 
   Args:
@@ -497,10 +504,8 @@ def _get_invoker_url(platform: str,
   return f'https://{location}-{project}.cloudfunctions.net/{deployment_name}_{solution_prefix}_{platform}_invoker'
 
 
-def _get_queue_config(client: tasks_v2.CloudTasksClient,
-                      project: str,
-                      location: str,
-                      config: Dict[str, Any]) -> Dict[str, Any]:
+def _get_queue_config(client: tasks_v2.CloudTasksClient, project: str,
+                      location: str, config: Dict[str, Any]) -> Dict[str, Any]:
   """Returns configuration for the Cloud Tasks queue.
 
   Args:
@@ -595,15 +600,15 @@ def file_slicer(data, context=Optional[Context]):
   file_name = data['name']
   input_bucket = data['bucket']
   required_elem = [
-      'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION',
-      'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'SERVICE_ACCOUNT',
-      'STORE_RESPONSE_STATS_TOPIC', 'OUTPUT_GCS_BUCKET'
+      'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION', 'DEPLOYMENT_NAME',
+      'SOLUTION_PREFIX', 'SERVICE_ACCOUNT', 'STORE_RESPONSE_STATS_TOPIC',
+      'OUTPUT_GCS_BUCKET'
   ]
   if not all(elem in os.environ for elem in required_elem):
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
-  if file_name.endswith('.csv'):
+  if file_name.endswith('.csv') or file_name.endswith('.json'):
     # Create a client.
     client = tasks_v2.CloudTasksClient()
     storage_client = storage.Client()
@@ -627,15 +632,9 @@ def file_slicer(data, context=Optional[Context]):
           f'{deployment_name}_{solution_prefix}_{target_platform}_config')
 
       max_chunk_lines = config['slicer']['max_chunk_lines']
-      queue_config = _get_queue_config(client,
-                                       project,
-                                       location,
-                                       config)
-      invoker_url = _get_invoker_url(target_platform,
-                                     location,
-                                     project,
-                                     deployment_name,
-                                     solution_prefix)
+      queue_config = _get_queue_config(client, project, location, config)
+      invoker_url = _get_invoker_url(target_platform, location, project,
+                                     deployment_name, solution_prefix)
       _file_slicer_worker(client, storage_client, file_name, input_bucket,
                           output_bucket, max_chunk_lines, project, location,
                           queue_config, invoker_url, service_account,
@@ -649,9 +648,9 @@ def file_slicer(data, context=Optional[Context]):
       _mv_blob(storage_client, input_bucket, source_file_name, output_bucket,
                target_file_name)
       parent_cid, parent_date = _extract_info_from_filename(file_name)
-      input_json = _build_file_message(parent_cid,
-                                       file_name, os.path.dirname(file_name),
-                                       -1, -1, file_name, -1, parent_date,
+      input_json = _build_file_message(parent_cid, file_name,
+                                       os.path.dirname(file_name), -1, -1,
+                                       file_name, -1, parent_date,
                                        processing_date, None, target_platform)
 
       pubsub_payload = _add_errors_to_input_data(input_json, -1)
@@ -668,10 +667,7 @@ def main(argv: Sequence[str]) -> None:
   Returns:
       None
   """
-  data = {
-      'bucket': os.environ['INPUT_GCS_BUCKET'],
-      'name': argv[1]
-    }
+  data = {'bucket': os.environ['INPUT_GCS_BUCKET'], 'name': argv[1]}
   file_slicer(data=data)
 
 
