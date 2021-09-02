@@ -1,7 +1,5 @@
 # Centimani - User & Developer Guide
 
-![alt_text](docs/resources/image1.png "image_tooltip")
-
 ## What’s Centimani?
 
 Centimani is a configurable massive file processor able to split text files in chunks, process them following a strategic pattern and store the results in BigQuery for reporting. It provides configurable options for chunk size, number of retries and takes care of exponential backoff to ensure all requests have enough retries to overcome potential temporary issues or errors.
