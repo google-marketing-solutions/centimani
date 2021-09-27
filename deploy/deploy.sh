@@ -21,45 +21,114 @@ FUNCTIONS_DIR="../cfs"
 
 source "$ENV_PATH"
 
-function deploy_solution {
+# Initialise option flag with a false value
+OPT_DEPLOY_ALL='true'
+OPT_DEPLOY_ONLY_SECRETS='false'
+OPT_DEPLOY_ONLY_CLOUD_FUNCTIONS='false'
 
+# Get command line flags to customize the deployment execution.
+function get_flags {
+  USAGE="$(basename "$0") [-h] [-s] [-f] -- deployment script for Centimani solution.
+
+  where:
+      -h  shows this help message.
+      -c  only uploads configuration to the Secret Manager. 
+      -f  only deploys cloud functions.
+
+  Options -s and -f can be combined to perform both operations in the same execution.
+  Everything will be deployed if no options are passed to the script.
+  " 
+
+  # Process all options supplied on the command line 
+  local OPTIND OPTARG
+  while getopts ':hcf' 'OPTKEY'; do
+      case ${OPTKEY} in
+          'h')
+              print_welcome_message
+              echo "$USAGE"
+              exit
+              ;;
+          'c')
+            # update configuration in secret manager
+              OPT_DEPLOY_ALL='false'
+              OPT_DEPLOY_ONLY_SECRETS='true'
+              ;;
+          'f')
+            # deploy cloud functions
+              OPT_DEPLOY_ALL='false'
+              OPT_DEPLOY_ONLY_CLOUD_FUNCTIONS='true'
+              ;;
+          '?')
+              print_welcome_message
+              echo "Illegal option: -${OPTARG}" >&2
+              echo "$USAGE" >&2
+              exit 1
+              ;;
+          *)
+              echo "UNIMPLEMENTED OPTION -- ${OPTKEY}" >&2
+              exit 1
+              ;;
+      esac
+  done
+
+  # Remove all options processed by getopts.
+  shift $(( OPTIND - 1 ))
+  [[ "${1}" == "--" ]] && shift
+}
+
+function deploy_solution {
   print_welcome_message
   gcloud config set project "$DEFAULT_GCP_PROJECT"
   gcloud config set compute/region "$DEFAULT_GCP_REGION"
 
-  enable_services
-  echo "**************************************************************"
-  echo "* Services Enabled. Waiting for changes to be applied...     *"
-  echo "**************************************************************"
-  sleep 30
-  create_service_account
-  sleep 30
-  echo "**************************************************************"
-  echo "* Service Account Created.                                   *"
-  echo "**************************************************************"
-  set_service_account_permissions
-  echo "**************************************************************"
-  echo "* Account Permissions Set.                                   *"
-  echo "**************************************************************"
-  create_secrets
-  echo "**************************************************************"
-  echo "* Secrets Created.                                            *"
-  echo "**************************************************************"
-  deploy_cloud_functions
-  echo "**************************************************************"
-  echo "* Cloud Functions Successfully Deployed.                     *"
-  echo "**************************************************************"
+  if ${OPT_DEPLOY_ALL}; then
+    enable_services
+    echo "**************************************************************"
+    echo "* Services Enabled. Waiting for changes to be applied...     *"
+    echo "**************************************************************"
+    sleep 30
+    create_service_account
+    sleep 30
+    echo "**************************************************************"
+    echo "* Service Account Created.                                   *"
+    echo "**************************************************************"
+    set_service_account_permissions
+    echo "**************************************************************"
+    echo "* Account Permissions Set.                                   *"
+    echo "**************************************************************"
+  fi
+
+  if ${OPT_DEPLOY_ALL} || ${OPT_DEPLOY_ONLY_SECRETS}; then
+    create_secrets
+    echo "**************************************************************"
+    echo "* Secrets Created.                                           *"
+    echo "**************************************************************"
+  fi
+
+  if ${OPT_DEPLOY_ALL} || ${OPT_DEPLOY_ONLY_CLOUD_FUNCTIONS}; then
+    deploy_cloud_functions
+    echo "**************************************************************"
+    echo "* Cloud Functions Successfully Deployed.                     *"
+    echo "**************************************************************"
+  fi
+
+  if ${OPT_DEPLOY_ALL}; then
   create_schedulers
-  echo "**************************************************************"
-  echo "* Schedulers Successfully Deployed.                          *"
-  echo "**************************************************************"
-  create_bq_dataset
-  echo "**************************************************************"
-  echo "**************************************************************"
-  echo " IMPORTANT: run the post deployment tasks explained in the doc!"
-  echo " IMPORTANT: grant $SERVICE_ACCOUNT on external resources!!    "
-  echo "**************************************************************"
-  echo "**************************************************************"
+    echo "**************************************************************"
+    echo "* Schedulers Successfully Deployed.                          *"
+    echo "**************************************************************"
+    create_bq_dataset
+    echo "**************************************************************"
+    echo "* BigQuery dataset Successfully Deployed.                    *"
+    echo "**************************************************************"
+  fi
+
+  echo ""
+  echo "Please remember to follow the next steps:"
+  echo " - Run the post deployment tasks explained in the docs, if any."
+  echo " - Grant $SERVICE_ACCOUNT "
+  echo "   access to external resources (e.g., Google Ads, Merchant Center) if needed."
+  echo ""
   print_completion_message
 }
 # Prints the ASCII-art logo
@@ -224,10 +293,11 @@ function create_bq_dataset {
 # Print the completion message once all components have been deployed.
 function print_completion_message {
   echo "
-<><><><><><><><><><><><><><><><><><><>
+---------------------------------------------------------------------------
 "
-  echo "$DEPLOY_NAME.$SOLUTION_NAME Massive Uploader has now been deployed.
+  echo "$DEPLOYMENT_NAME.$SOLUTION_PREFIX has now been deployed.
 Please check the logs for any errors. If there are none, you're all set up!
 "
 }
+get_flags "$@"
 deploy_solution

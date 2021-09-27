@@ -267,8 +267,27 @@ The deployment script will grant permissions, enable services and create all Goo
 Centimani to run.
 
 Progress in displayed on the screen, so please take a look for any issues reported during the
-deployment process. You may re-run the script after fixing any reported issue in order to ensure a healthy installation
-of the solution.
+deployment process. You may re-run the script after fixing any reported issue in order to ensure a healthy installation of the solution.
+
+#### Updating the Deployment
+
+If you have already deployed the solution but only want to update the configuration or the cloud functions,
+you can use some flags to indicate what needs to be done.
+Remember that this is only useful after the tool is fully deployed.
+
+- If you only want to update the configuration, use the `-c` flag:
+
+  ```sh
+  cd deploy/
+  bash deploy.sh -c
+  ```
+
+- If you only want to deploy the cloud functions, use the `-d` flag:
+  
+  ```sh
+  cd deploy/
+  bash deploy.sh -f
+  ```
 
 ## How to use Centimani
 

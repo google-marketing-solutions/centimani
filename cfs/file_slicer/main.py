@@ -369,7 +369,7 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
   else:
     # Not a CSV file.
     entries_list = io.StringIO(entries_blob)
-    parent_numrows = sum(1 for row in entries_list) - 1
+    parent_numrows = sum(1 for row in entries_list)
     entries_list = io.StringIO(entries_blob)
 
   num_rows = 0
@@ -378,7 +378,7 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
   extra_params = []
   header = []
   chunk_lines = 0
-  parent_numchunks = None
+  parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
 
   for entry_info in entries_list:
     num_rows = num_rows + 1
@@ -386,8 +386,6 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
     if num_rows > 2:
       chunk_buffer.append(entry_info)
       chunk_lines += 1
-      if not parent_numchunks:
-        parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
     else:
       if num_rows == 1:
         extra_params = _get_file_parameters(entry_info)
@@ -401,6 +399,7 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
             chunk_lines += 1
         else:
           parent_numrows = parent_numrows - 1
+          parent_numchunks = math.ceil(parent_numrows / max_chunk_lines)
       else:
         if num_rows == 2:
           # If parameters line was present, second row is header if CSV file.
