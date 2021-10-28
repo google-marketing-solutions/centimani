@@ -49,85 +49,33 @@ CACHE_TTL_IN_HOURS = 'cache_ttl_in_hours'
 FULL_PATH_TOPIC = 'full_path_topic'
 MAX_ATTEMPTS = 'max_attempts'
 
-PRODUCT_SINGLE_ATTR = {
-    'id': 'offerId',
-    'title': 'title',
-    'description': 'description',
-    'link': 'link',
-    'image_link': 'imageLink',
-    'content_language': 'contentLanguage',
-    'target_country': 'targetCountry',
-    'channel': 'channel',
-    'expiration_date': 'expirationDate',
-    'adult': 'adult',
-    'kind': 'kind',
-    'brand': 'brand',
-    'color': 'color',
-    'google_product_category': 'googleProductCategory',
-    'gtin': 'gtin',
-    'item_group_id': 'itemGroupId',
-    'material': 'material',
-    'mpn': 'mpn',
-    'pattern': 'pattern',
-    'sale_price_effective_date': 'salePriceEffectiveDate',
-    'identifier_exists': 'identifierExists',
-    'multipack': 'multipack',
-    'custom_label_0': 'customLabel0',
-    'custom_label_1': 'customLabel1',
-    'custom_label_2': 'customLabel2',
-    'custom_label_3': 'customLabel3',
-    'custom_label_4': 'customLabel4',
-    'is_bundle': 'isBundle',
-    'mobile_link': 'mobileLink',
-    'availability_date': 'availabilityDate',
-    'shipping_label': 'shippingLabel',
-    'display_ads_id': 'displayAdsId',
-    'display_ads_title': 'displayAdsTitle',
-    'display_ads_link': 'displayAdsLink',
-    'display_ads_value': 'displayAdsValue',
-    'sell_on_google_quantity': 'sellOnGoogleQuantity',
-    'max_handling_time': 'maxHandlingTime',
-    'min_handling_time': 'minHandlingTime',
-    'age_group': 'ageGroup',
-    'availability': 'availability',
-    'condition': 'condition',
-    'gender': 'gender',
-    'size_system': 'sizeSystem',
-    'size_type': 'sizeType',
-    'source': 'source',
-    'additional_size_type': 'additionalSizeType',
-    'energy_efficiency_class': 'energyEfficiencyClass',
-    'min_energy_efficiency_class': 'minEnergyEfficiencyClass',
-    'max_energy_efficiency_class': 'maxEnergyEfficiencyClass',
-    'tax_category': 'taxCategory',
-    'transit_time_label': 'transitTimeLabel',
-    'pickup_method': 'pickupMethod',
-    'pickup_sla': 'pickupSla',
-    'link_template': 'linkTemplate',
-    'mobile_link_template': 'mobileLinkTemplate',
-    'canonical_link': 'canonicalLink',
-    'ads_grouping': 'adsGrouping',
-    'adsRedirect': 'ads_redirect'
-}
-PRODUCT_ARRAY_ATTR = {
-    'additional_image_link': 'additionalImageLinks',
-    'size': 'sizes',
-    'display_ads_similar_id': 'displayAdsSimilarIds',
-    'promotion_id': 'promotionIds',
-    'included_destination': 'includedDestinations',
-    'excluded_destination': 'excludedDestinations',
-    'ads_label': 'adsLabels',
-    'product_type': 'productTypes',
-    'shopping_ads_excluded_country': 'shoppingAdsExcludedCountries',
-    'product_highlight': 'productHighlights'
-}
 
-PRODUCT_OTHER_ATTR = {
-    'price': 'price',
-    'sale_price': 'salePrice',
-    'shipping': 'shipping',
-    'shipping_weight': 'shippingWeight'
-}
+class NonRetryableError(Exception):
+  """Exception raised for errors that shouldn't be retried.
+
+  Attributes:
+    message: explanation of the error
+    code: return code
+  """
+
+  def __init__(self, message):
+    self.message = message
+    self.code = 200
+    super().__init__(self.message)
+
+
+class RetryableError(Exception):
+  """Exception raised for errors that should be retried.
+
+  Attributes:
+    message: explanation of the error
+    code: return code
+  """
+
+  def __init__(self, message):
+    self.message = message
+    self.code = 500
+    super().__init__(self.message)
 
 
 def _count_partial_errors(response: str):
@@ -294,7 +242,7 @@ def _mv_blob_if_last_try(task_retries, max_attempts, input_json, bucket_name):
     None.
   """
 
-  if task_retries + 1 == max_attempts:
+  if task_retries + 1 >= max_attempts:
     datestamp = input_json['date']
     chunk_filename = input_json['child']['file_name']
     full_chunk_path = datestamp + '/slices_processing/' + chunk_filename
@@ -322,12 +270,7 @@ def _upload_products(service: discovery.Resource, env_info: Dict[str, Any],
   """
 
   try:
-    response = None
-
-    if job_info['operation'] in ['insert', 'delete', 'direct']:
-      response = _send_products_in_batch(service, job_info, products)
-    else:
-      raise Exception(f'Invalid operation found: {job_info["operation"]}.')
+    response = _send_products_in_batch(service, products)
     if response:
       num_partial_errors, error_array = _count_partial_errors(response)
       pubsub_payload = _add_errors_to_input_data(job_info['input_json'],
@@ -358,140 +301,6 @@ def _upload_products(service: discovery.Resource, env_info: Dict[str, Any],
     _mv_blob_if_last_try(task_retries, env_info[MAX_ATTEMPTS], input_json,
                          env_info[BUCKET_NAME])
     return 500
-  return 200
-
-
-def _build_products(raw_products: List[List[str]], job_info: Dict[str, Any]):
-  """Builds a list of products from the raw data provided in the CSV file.
-
-  Args:
-    raw_products: Products read from the CSV file.
-    job_info: Job configuration derived from the input_json object.
-
-  Returns:
-    A list of products prepared to be uploaded.
-  """
-  fields = next(raw_products)
-  fields = [x.strip() for x in fields]
-  # Remove BOM if present
-  fields[0] = fields[0].replace('\ufeff', '')
-  products = []
-  for raw_product in raw_products:
-    raw_product = [x.strip() for x in raw_product]
-    if (job_info['operation'] == 'delete'):
-      product = _build_product_for_deletion(raw_product, fields, job_info)
-    else:
-      product = _build_product_for_insertion(raw_product, fields, job_info)
-    if product:
-      products.append(product)
-  return products
-
-
-def _build_product_for_insertion(raw_product: List[str], fields: List[str],
-                                 job_info: Dict[str, Any]):
-  """Builds a single product object from the raw data provided in the CSV file.
-
-  Args:
-    raw_product: Products read from the CSV file.
-    fields: A list with the fields' names from the header of the CSV file.
-    job_info: Job configuration derived from the input_json object.
-
-  Returns:
-    An individual product prepared to be uploaded.
-  """
-  product = {
-      'channel': job_info['channel'],
-      'targetCountry': job_info['target_country'],
-      'contentLanguage': job_info['content_language']
-  }
-
-  for field, value in zip(fields, raw_product):
-    if value:
-      if field in PRODUCT_SINGLE_ATTR:
-        product[PRODUCT_SINGLE_ATTR[field]] = value
-      elif field in PRODUCT_ARRAY_ATTR:
-        if PRODUCT_ARRAY_ATTR[field] not in product:
-          product[PRODUCT_ARRAY_ATTR[field]] = []
-        product[PRODUCT_ARRAY_ATTR[field]].append(value)
-      else:
-        # Check for special fields
-        if field in ['price', 'sale_price']:
-          values = value.split(sep=' ', maxsplit=1)
-          currency = job_info['default_currency']
-          if len(values) > 1:
-            currency = values[1]
-          product[PRODUCT_OTHER_ATTR[field]] = {
-              'value': values[0],
-              'currency': currency
-          }
-        elif field == 'shipping':
-          multiple_shippings = value.split(sep=',')
-          product[PRODUCT_OTHER_ATTR[field]] = []
-          for shipping_info in multiple_shippings:
-            splitted = shipping_info.split(sep=':')
-            shipping = {'country': splitted[0]}
-            if len(splitted) > 1 and splitted[1]:
-              # Warning: We are hardcoding region, but it could also be
-              # postal_code, location_id or location_group_name
-              shipping['region'] = splitted[1]
-            if len(splitted) > 2 and splitted[2]:
-              shipping['service'] = splitted[2]
-            if len(splitted) > 3 and splitted[3]:
-              values = splitted[3].split(sep=' ', maxsplit=1)
-              currency = job_info['default_currency']
-              if len(values) > 1:
-                currency = values[1]
-              shipping['price'] = {'value': values[0], 'currency': currency}
-            if len(splitted) > 4 and splitted[4]:
-              shipping['minHandlingTime'] = splitted[4]
-            if len(splitted) > 5 and splitted[5]:
-              shipping['maxHandlingTime'] = splitted[5]
-            if len(splitted) > 6 and splitted[6]:
-              shipping['minTransitTime'] = splitted[6]
-            if len(splitted) > 7 and splitted[7]:
-              shipping['maxTransitTime'] = splitted[7]
-
-            product[PRODUCT_OTHER_ATTR[field]].append(shipping)
-        elif field == 'shipping_weight':
-          values = value.split(sep=' ', maxsplit=1)
-          unit = job_info['default_shipping_weight_unit']
-          if len(values) > 1:
-            unit = values[1]
-          product[PRODUCT_OTHER_ATTR[field]] = {
-              'value': values[0],
-              'unit': unit
-          }
-
-  return product
-
-
-def _build_product_for_deletion(raw_product: List[str], fields: List[str],
-                                job_info: Dict[str, Any]):
-  """Builds a single product object from the raw data provided in the CSV file.
-
-  Args:
-    raw_product: Products read from the CSV file.
-    fields: A list with the fields' names from the header of the CSV file.
-    job_info: Job configuration derived from the input_json object.
-
-  Returns:
-    An individual product prepared to be uploaded.
-  """
-  product = {}
-
-  if 'product_id' in fields:
-    product['productId'] = raw_product[fields.index('product_id')]
-  elif 'productId' in fields:
-    product['productId'] = raw_product[fields.index('productId')]
-  elif 'id' in fields:
-    product['productId'] = (f'{job_info["channel"]}'
-                            f':{job_info["content_language"]}'
-                            f':{job_info["target_country"]}'
-                            f':{raw_product[fields.index("id")]}')
-  else:
-    print('Invalid product received for deletion. No product_id or id found.')
-
-  return product
 
 
 def _send_pubsub_message(project_id, reporting_topic, pubsub_payload):
@@ -576,15 +385,10 @@ def _mc_invoker_worker(service: discovery.Resource, env_info: Dict[str, Any],
                                          chunk_filename)
 
   if full_chunk_name:
-    allowed_file_check = re.match('.*\\.(csv|json)[-0-9]+$', full_chunk_name)
+    allowed_file_check = re.match('.*\\.(json)[-0-9]+$', full_chunk_name)
   if full_chunk_name and allowed_file_check:
-    extension = allowed_file_check.group(1)
-    if extension == 'csv':
-      raw_products = _read_csv_from_blob(env_info[BUCKET_NAME], full_chunk_name)
-      ready_products = _build_products(raw_products, job_info)
-    else:
-      ready_products = _read_json_from_blob(env_info[BUCKET_NAME],
-                                            full_chunk_name)
+    ready_products = _read_json_from_blob(env_info[BUCKET_NAME],
+                                          full_chunk_name)
     result = _upload_products(
         service,
         env_info,
@@ -627,36 +431,16 @@ def _enhance_information_from_json(
     Exception: File name format is missing information.
   """
 
-  # Proposed filename structure:
-  # mc_<free-text-without-underscore>_<merchant_id>_<operation>_<crendential>_\
-  #    <date>_<channel>-<language>-<country>-<weight_unit>-<currency>
-
-  file_name = re.sub(r'.(csv|txt|tsv)$', '', input_json['parent']['file_name'])
+  file_name = re.sub(r'.(json)$', '', input_json['parent']['file_name'])
   arr = file_name.split('_')
-  if len(arr) < 6:
-    raise Exception('File name format is missing information.')
+  if len(arr) < 4:
+    raise NonRetryableError(message='File name format is missing information.')
 
   job_info = {
       'input_json': input_json,
-      'merchant_id': arr[2].replace('-', ''),
-      'operation': arr[3].lower(),
-      'credentials_name': arr[4].lower(),
-      'date': arr[5],
-      'channel': 'online',
-      'content_language': 'es',
-      'target_country': 'ES',
-      'default_shipping_weight_unit': 'kg',
-      'default_currency': 'EUR',
+      'credentials_name': arr[2].lower(),
+      'date': arr[3]
   }
-
-  extra_parameters = arr[6].split('-')
-  extra_labels = [
-      'channel', 'content_language', 'target_country',
-      'default_shipping_weight_unit', 'default_currency'
-  ]
-  for i in range(len(extra_parameters)):
-    if extra_parameters[i]:
-      job_info[extra_labels[i]] = extra_parameters[i]
 
   return job_info
 
@@ -675,7 +459,7 @@ def _get_credentials(credentials_name, config):
     Exception: Credentials not found.
   """
   if credentials_name not in config['credentials']:
-    raise Exception(f'Credentials for {credentials_name} not found.')
+    raise NonRetryableError(f'Credentials for {credentials_name} not found.')
 
   print(f'Using {credentials_name} credentials to authenticate.')
   return config['credentials'][credentials_name]
@@ -706,44 +490,26 @@ def initialize_service(auth_config):
   account_ids = auth_info.get('accountIdentifiers')
 
   if not account_ids:
-    raise Exception('The currently authenticated user does not have access to '
-                    'any Merchant Center accounts.')
+    raise NonRetryableError(
+        'The currently authenticated user does not have access to '
+        'any Merchant Center accounts.')
 
   return service
 
 
-def _send_products_in_batch(service: discovery.Resource, job_info: Dict[str,
-                                                                        Any],
+def _send_products_in_batch(service: discovery.Resource,
                             products: List[Dict[str, Any]]):
   """Sends products using batches through the Content API.
 
   Args:
     service: Initialized service of a Content API client.
-    job_info: Job configuration derived from the input_json object.
     products: Chunk of products prepared to be uploaded.
 
   Returns:
-    The result of the insert operation.
+    The result of the batch operation.
   """
-  merchant_id = job_info['merchant_id']
 
-  batch = {'entries': []}
-  counter = 0
-  if job_info['operation'] == 'direct':
-    batch['entries'] = products
-  else:
-    for product in products:
-      counter += 1
-      entry = {
-          'batchId': counter,
-          'merchantId': merchant_id,
-          'method': job_info['operation'],
-      }
-      if job_info['operation'] == 'delete':
-        entry['productId'] = product['productId']
-      else:
-        entry['product'] = product
-      batch['entries'].append(entry)
+  batch = {'entries': products}
   request = service.products().custombatch(body=batch)
   response = request.execute()
 
@@ -818,6 +584,13 @@ def mc_invoker(request):
       task_retries = int(request.headers.get('X-Cloudtasks-Taskretrycount'))
       print('Got {} task retries from Cloud Tasks'.format(task_retries))
 
+    is_file_allowed = re.match('.*\\.(json)$',
+                               input_json['parent']['file_name'])
+
+    if not is_file_allowed:
+      raise NonRetryableError(
+          message='Original file not allowed. It must be in json format.')
+
     job_info = _enhance_information_from_json(input_json)
 
     auth_config = _get_credentials(job_info['credentials_name'], config)
@@ -826,6 +599,38 @@ def mc_invoker(request):
     result = _mc_invoker_worker(service, env_info, job_info, task_retries)
 
     return Response('', result)
+
+  except NonRetryableError as e:
+    print('ERROR: Unexpected non retryable exception raised: ',
+          sys.exc_info()[0])
+    str_traceback = traceback.format_exc()
+    print('Unexpected non retryable exception traceback follows:')
+    print(str_traceback)
+
+    pubsub_payload = _add_errors_to_input_data(input_json,
+                                               input_json['child']['num_rows'])
+    _send_pubsub_message(env_info[PROJECT_ID], env_info[FULL_PATH_TOPIC],
+                         pubsub_payload)
+    # move blob to /slices_failed
+    _mv_blob_if_last_try(env_info[MAX_ATTEMPTS], env_info[MAX_ATTEMPTS],
+                         input_json, env_info[BUCKET_NAME])
+    return Response('', e.code)
+
+  except RetryableError as e:
+    print('ERROR: Unexpected retryable exception raised: ', sys.exc_info()[0])
+    str_traceback = traceback.format_exc()
+    print('Unexpected retryable exception traceback follows:')
+    print(str_traceback)
+    print('This task will be retried again.')
+
+    pubsub_payload = _add_errors_to_input_data(input_json,
+                                               input_json['child']['num_rows'])
+    _send_pubsub_message(env_info[PROJECT_ID], env_info[FULL_PATH_TOPIC],
+                         pubsub_payload)
+    # If last try, move blob to /slices_failed
+    _mv_blob_if_last_try(task_retries, env_info[MAX_ATTEMPTS], input_json,
+                         env_info[BUCKET_NAME])
+    return Response('', e.code)
 
   # pylint: disable=broad-except
   except Exception:
@@ -839,10 +644,10 @@ def mc_invoker(request):
                                                input_json['child']['num_rows'])
     _send_pubsub_message(env_info[PROJECT_ID], env_info[FULL_PATH_TOPIC],
                          pubsub_payload)
-    # If last try, move blob to /slices_failed
-    _mv_blob_if_last_try(task_retries, env_info[MAX_ATTEMPTS], input_json,
-                         env_info[BUCKET_NAME])
-    return Response('', 500)
+    # move blob to /slices_failed
+    _mv_blob_if_last_try(env_info[MAX_ATTEMPTS], env_info[MAX_ATTEMPTS],
+                         input_json, env_info[BUCKET_NAME])
+    return Response('', 200)
 
 
 def _test_main() -> None:
@@ -865,7 +670,7 @@ def _test_main() -> None:
       '"file_date": "YYYYMMDD",'
       '"total_files": 100,'
       '"total_rows": 25000},'
-      '"child": {"file_name": "MC_MERCHANT-TEST_11111111_insert_default_YYYYMMDD_online-xx-XX-xx-XXX.csv---3",'
+      '"child": {"file_name": "MC_MERCHANT-TEST_11111111_insert_default_YYYYMMDD_online-xx-XX-xx-XXX.json---3",'
       '"num_rows": 250}}')
 
   input_json = json.loads(input_string)

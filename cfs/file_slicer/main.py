@@ -25,6 +25,7 @@ import json
 import math
 import os
 import random
+import re
 import string
 import sys
 from typing import Any, Dict, Sequence, Optional, Tuple
@@ -448,17 +449,18 @@ def _file_slicer_worker(client, storage_client, file_name, input_bucket_name,
 
 
 def _extract_info_from_filename(filename: str) -> Tuple[str, str]:
-  """Extracts the parent cid and date from file name.
+  """Extracts the parent id and date from file name.
 
-    File format is as follows:
-
-    <platform>_<free-text-without-underscore>_<cid>_<login-cid>_<conv-definition-cid>
+    To extract the date, it will first use the legacy syntax (date is in array
+    position 5 after splitting by "_" character), and if it doesn't match with
+    a date, it will try to look for another field with a matching date. If not
+    found, it will default to the current date.
 
   Args:
     filename: the name of the file
 
   Returns:
-        The cid of the file
+        The id of the file (in general, the value in array position 2)
         The date of the file
 
   Raises:
@@ -466,10 +468,21 @@ def _extract_info_from_filename(filename: str) -> Tuple[str, str]:
   """
   arr = filename.split('_')
 
-  if len(arr) < 6:
+  if len(arr) < 4:
     raise Exception('File name format is not correct')
 
-  return (arr[2].replace('-', ''), arr[5].replace('-', ''))
+  cid = arr[2].replace('-', '')
+  date = datetime.datetime.now().strftime('%Y%m%d')
+
+  date_regex = '[0-9]{4}-?[0-9]{2}-?[0-9]{2}'
+  if len(arr) > 5 and re.match(date_regex, arr[5]):
+    date = arr[5].replace('-', '')
+  else:
+    for item in arr:
+      if re.match(date_regex, item):
+        date = item.replace('-', '')
+        break
+  return (cid, date)
 
 
 def _get_target_platform(file_name: str) -> str:
@@ -642,7 +655,7 @@ def file_slicer(data, context=Optional[Context]):
       now = datetime.datetime.now()
       processing_date = now.strftime('%Y%m%d')
       file_name = os.path.basename(file_name)
-      source_file_name = f'input/{file_name}'
+      source_file_name = f'{file_name}'
       target_file_name = f'{processing_date}/failed/{file_name}'
       _mv_blob(storage_client, input_bucket, source_file_name, output_bucket,
                target_file_name)
