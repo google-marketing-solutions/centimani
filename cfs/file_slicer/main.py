@@ -474,13 +474,13 @@ def _extract_info_from_filename(filename: str) -> Tuple[str, str]:
   cid = arr[2].replace('-', '')
   date = datetime.datetime.now().strftime('%Y%m%d')
 
-  date_regex = '[0-9]{4}-?[0-9]{2}-?[0-9]{2}'
+  date_regex = '.*([0-9]{4}-?[0-9]{2}-?[0-9]{2}).*'
   if len(arr) > 5 and re.match(date_regex, arr[5]):
-    date = arr[5].replace('-', '')
+    re.sub(date_regex, '\\1', arr[5].replace('-', ''))
   else:
     for item in arr:
       if re.match(date_regex, item):
-        date = item.replace('-', '')
+        re.sub(date_regex, '\\1', item.replace('-', ''))
         break
   return (cid, date)
 
@@ -612,11 +612,14 @@ def file_slicer(data, context=Optional[Context]):
   file_name = data['name']
   input_bucket = data['bucket']
   required_elem = [
-      'DEFAULT_GCP_PROJECT', 'DEFAULT_GCP_REGION', 'DEPLOYMENT_NAME',
+      'PROJECT_ID', 'REGION', 'DEPLOYMENT_NAME',
       'SOLUTION_PREFIX', 'SERVICE_ACCOUNT', 'STORE_RESPONSE_STATS_TOPIC',
       'OUTPUT_GCS_BUCKET'
   ]
   if not all(elem in os.environ for elem in required_elem):
+    for elem in required_elem:
+      if elem not in os.environ:
+        print (f'element {elem} not found')
     print('Cannot proceed, there are missing input values, '
           'please make sure you set all the environment variables correctly.')
     sys.exit(1)
@@ -626,8 +629,8 @@ def file_slicer(data, context=Optional[Context]):
     storage_client = storage.Client()
     print('Processing file %s' % file_name)
 
-    project = os.environ['DEFAULT_GCP_PROJECT']
-    location = os.environ['DEFAULT_GCP_REGION']
+    project = os.environ['PROJECT_ID']
+    location = os.environ['REGION']
     deployment_name = os.environ['DEPLOYMENT_NAME']
     solution_prefix = os.environ['SOLUTION_PREFIX']
     service_account = os.environ['SERVICE_ACCOUNT']

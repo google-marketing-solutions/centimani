@@ -27,7 +27,7 @@ from google.cloud import datastore as store
 from google.cloud.functions_v1.context import Context
 import pytz
 
-DEFAULT_GCP_PROJECT = os.getenv("DEFAULT_GCP_PROJECT", "")
+PROJECT_ID = os.getenv("PROJECT_ID", "")
 MAX_RETRIES = 3
 SLEEP_IN_SECONDS = 5
 
@@ -134,7 +134,7 @@ def main(event: Dict[str, Any], context=Optional[Context]):
 
   data = base64.b64decode(event["data"])
   input_data = json.loads(data)
-  db = store.Client(DEFAULT_GCP_PROJECT)
+  db = store.Client(PROJECT_ID)
   _insert_data_in_datastore(db, _build_data_for_store(input_data))
 
 

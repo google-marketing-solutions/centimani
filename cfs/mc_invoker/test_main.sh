@@ -16,11 +16,9 @@
 # limitations under the License.
 #
 
-CONFIG_PATH="../../deploy/config.yaml"
-HELPERS_PATH="../../deploy/helpers.sh"
+CONFIG_PATH="../../terraform/terraform.tfvars"
 
-source "$HELPERS_PATH"
 set -a
-eval "$(parse_yaml ""$CONFIG_PATH"")"
+eval "$(cat ${CONFIG_PATH} | sed -e 's/ *= */=/g')"
 
 python main.py

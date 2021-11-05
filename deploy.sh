@@ -1,5 +1,5 @@
 #!/bin/bash
-# Calls another script to delete all sharded BigQuery tables
+# Main Deployment Script
 #
 # Copyright 2020 Google LLC
 #
@@ -14,5 +14,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-delete_sharded_tables.sh massive_conversions_reporting daily_results_ -f
+
+terraform -chdir=terraform init 
+terraform -chdir=terraform apply -auto-approve

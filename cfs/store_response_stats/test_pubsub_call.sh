@@ -16,15 +16,14 @@
 # limitations under the License.
 #
 
-CONFIG_PATH="../../deploy/config.yaml"
-HELPERS_PATH="../../deploy/helpers.sh"
+CONFIG_PATH="../../terraform/terraform.tfvars"
 
-source "$HELPERS_PATH"
-eval "$(parse_yaml $CONFIG_PATH)"
+set -a
+eval "$(cat ${CONFIG_PATH} | sed -e 's/ *= */=/g')"
 
-TOPIC_NAME="$GADS_RESPONSE_HANDLER_TOPIC"
+TOPIC_NAME="$STORE_RESPONSE_STATS_TOPIC"
 
-gcloud config set project "$DEFAULT_GCP_PROJECT"
+gcloud config set project "$PROJECT_ID"
 gcloud pubsub topics publish "$TOPIC_NAME" \
   --message '{
    "test":"test"

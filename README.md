@@ -38,59 +38,65 @@ details in case any of them failed. You can see a couple of examples below.
 
 ### Preparation Steps
 
-1. Edit the `config.yaml` file inside the `deploy` directory and configure your solution and cloud project settings, using the first part of the file (up to the ‘DO NOT MODIFY’ line).
+1. Edit the `terraform.tfvars` file inside the `terraform` directory and configure your
+solution and cloud project settings.
 
-   `DEPLOYMENT_NAME` & `SOLUTION_PREFIX`: These values will be used to build the name of every artifact, so no collision with other deployments may happen.
+   `PROJECT_ID` & `REGION`: The name of your Google Cloud project and the corresponding
+   region.
 
-   ```text
-   DEPLOYMENT_NAME: 'deployment-name' (i.e: production)
-   SOLUTION_PREFIX: 'descriptive-prefix' (i.e: conversion_uploader)
-   ```
+   `DEPLOYMENT_NAME` & `SOLUTION_PREFIX`: These values will be used to build the name of
+   every artifact, so no collision with other deployments may happen.
 
-   `SERVICE_ACCOUNT`: The service account to use. It will be created if it does not exist. Add it without domain if you’re not sure of the domain name. It must be 6 to 30 char long.
+   `SERVICE_ACCOUNT`: The service account to use. It will be created if it does not exist.
+   Add it without any domain. It must be 6 to 30 char long.
 
-   ```text
-   SERVICE_ACCOUNT: 'service-account-name-without-domain' (i.e mcu-123)
-   ```
+   `BQ_REPORTING_DATASET`, `BQ_REPORTING_TABLE` & `BQ_GCP_BROAD_REGION`: The name of the
+   BigQuery dataset, reporting table and the region where the BigQuery data will be stored.
+   
+   `INPUT_GCS_BUCKET`, `OUTPUT_GCS_BUCKET` & `BUILD_GCS_BUCKET`: The cloud storage buckets
+   to receive input files and store results, and to build the cloud functions at deployment
+   time.
+   
+   `REPORTING_DATA_EXTRACTOR_TOPIC` & `STORE_RESPONSE_STATS_TOPIC` : The name of the
+   pubsub topics used to trigger the reporting functions.
 
-   `DEFAULT_GCP_PROJECT` & `DEFAULT_GCP_REGION`: The name of your project and the corresponding region.
+   `CREATE_FIRESTORE` & `FIRESTORE_REGION` : In case no Datastore or Firestore database
+   has been created in the GCP Project (this should be the case for newly created ones),
+   please define `CREATE_FIRESTORE` as `true` to let the deployment script create it, and
+   specify the desired region (`us-central` or `europe-west`).
 
-   ```text
-   DEFAULT_GCP_PROJECT: 'your-project' (i.e massive-conversion-uploader)
-   DEFAULT_GCP_REGION: 'your-project-region' (allowed values here)
-   ```
+   `CACHE_TTL_IN_HOURS`: For specific operators using cache, this specifies the TTL of it.
 
-   `INPUT_GCS_BUCKET` & `OUTPUT_GCS_BUCKET`: The cloud storage buckets to receive input files and store results.
-
-   ```text
-   INPUT_GCS_BUCKET: 'the-input-bucket-name'
-   OUTPUT_GCS_BUCKET: 'the-output-bucket-name'
-   ```
-
-   `SKIP_DATABASE_CREATION`: Boolean defining if the dataset should be created at deployment time if missing.
-
-   ```text
-   SKIP_DATASET_CREATION: 'N'
-   ```
-
-   `BQ_REPORTING_DATASET`, `BQ_REPORTING_TABLE` & `BQ_GCP_BROAD_REGION`: The name of the BQ dataset, reporting table and the region where the BQ data will be stored.
+Sample configuration file:
 
    ```text
-   BQ_REPORTING_DATASET: 'the-dataset-name'
-   BQ_REPORTING_TABLE: 'the-table-name'
-   BQ_GCP_BROAD_REGION: 'EU' (allowed values here)
-   ```
+   PROJECT_ID = "centimani-project"
+   REGION     = "europe-west1"
+   
+   DEPLOYMENT_NAME = "production"
+   SOLUTION_PREFIX = "product-uploader"
+   SERVICE_ACCOUNT = "centimani-sa"
 
-   `TIMEZONE` & `REPORTING_DATA_POLLING_CONFIG`: Defines the timezone and scheduling (in crontab format) for the reporting stats.
+   BQ_REPORTING_DATASET = "centimani"
+   BQ_REPORTING_TABLE   = "daily_results"
+   BQ_GCP_BROAD_REGION  = "EU"
 
-   ```text
-   TIMEZONE: 'Europe/Madrid' (allowed values here)
-   REPORTING_DATA_POLLING_CONFIG: '\*/5 \* \* \* \*'
+   INPUT_GCS_BUCKET  = "centimani_input_bucket_896745"
+   OUTPUT_GCS_BUCKET = "centimani_output_bucket_896745"
+   BUILD_GCS_BUCKET  = "centimani_build_bucket_896745"
+
+   REPORTING_DATA_EXTRACTOR_TOPIC = "reporting_data_extractor_topic"
+   STORE_RESPONSE_STATS_TOPIC     = "store_response_stats_topic"
+
+   CREATE_FIRESTORE = true
+   FIRESTORE_REGION = "europe-west"
+
+   CACHE_TTL_IN_HOURS = "2"
    ```
 
 2. Add particular settings for **Google Ads Offline Conversions Uploader**:
 
-   1. Add the Google Ads credentials in the `gads_config.json` file, inside the `deploy` directory.
+   1. Edit the Google Ads credentials in the `gads_config.json` file, inside the `config` directory.
    2. Edit and replace the following variables in the `gads_config.json` file: *(Replace XXXXX with the customer id you want to login as. This value is used for looking up the conversion action ids)*
       - `credentials.XXXXX.developer_token:` the GAds developer token
       - `credentials.XXXXX.client_id:` the OAUTH2 client id
@@ -120,45 +126,51 @@ details in case any of them failed. You can see a couple of examples below.
 
 3. Add particular settings for **Merchant Center Products Uploader**:
 
-   1. If you already have a service account available in your Google Cloud proyect, download the API key in json format, and include it in the credential section of the `mc_config.json` file, inside the `deploy` directory. If you haven't created the service account yet, the deployment script will do that for you. After the deployment is done, return to this step and add it to the `mc_config.json`file.
-   2. Authorize your service account to manage your Merchant Center account. You can do this both at individual level, or at MCA level. If you haven't created the service account yet, do this step after the deployment is done.
-   3. Repeat steps 1 and 2 if you want to create separated access for different accounts within the same tool (you can create different credentials in the file, and select which one to use at runtime).
+   1. Edit the Merchant Center credentials in the `mc_config.json` file, inside the `config` directory.
+   2. If you already have a service account available in your Google Cloud project,
+   download the API key in json format, and include it in the credential section. If you
+   haven't created the service account yet, the deployment script will do that for you.
+   After the deployment is done, return to this step and add it to the `mc_config.json`file.
+   3. Authorize your service account to manage your Merchant Center account. You can do
+   this both at individual level, or at MCA level. If you haven't created the service
+   account yet, do this step after the deployment is done.
+   4. Repeat steps 1 and 2 if you want to create separated access for different accounts
+   within the same tool (you can create different credentials in the file, and select which
+   one to use at runtime).
 
 ### Deployment
 
-Centimani uses a centralized deployment script which will deploy each of the components. In order to start the process,
-once the configuration file is ready, just run the deployment script using its relative path from the root folder of Centimani:
+Centimani uses a centralized deployment script based on terraform which will deploy
+each of the components.
+In order to start the process, once the configuration files is ready, just run the
+deployment script from the root folder of Centimani:
 
 ```sh
-cd deploy/
 bash deploy.sh
 ```
 
-The deployment script will grant permissions, enable services and create all Google Cloud resources required for
-Centimani to run.
+The deployment script will grant permissions, enable services and create all Google Cloud
+resources required forCentimani to run.
 
-Progress in displayed on the screen, so please take a look for any issues reported during the
-deployment process. You may re-run the script after fixing any reported issue in order to ensure a healthy installation of the solution.
+Progress in displayed on the screen, so please take a look for any issues reported during
+the deployment process. You may re-run the script after fixing any reported issue in order
+to ensure a healthy installation of the solution.
+
+After the execution, terraform saves the state in a file called `terraform.tfstate`
+in the terraform directory. This will allow you to update quickly any resource that
+had changed after the initial deployment (think of configuration changes or centimani
+version upgrades). We strongly recommend you to store this file for future updates
+otherwise you would need to do manual import operations to get the terraform state
+back in sync before being able to update the deployment.
 
 ### Updating the Deployment
 
-If you have already deployed the solution but only want to update the configuration or the cloud functions,
-you can use some flags to indicate what needs to be done.
-Remember that this is only useful after the tool is fully deployed.
+If you have already deployed the solution but only want to update the configuration or the cloud functions, you can just run the deployment script again (make sure your
+`terraform.tfstate` file is in the terraform directory).
 
-- If you only want to update the configuration, use the `-c` flag:
-
-  ```sh
-  cd deploy/
-  bash deploy.sh -c
-  ```
-
-- If you only want to deploy the cloud functions, use the `-d` flag:
-  
-  ```sh
-  cd deploy/
-  bash deploy.sh -f
-  ```
+```sh
+bash deploy.sh
+```
 
 ## Maintenance
 
@@ -166,8 +178,9 @@ Remember that this is only useful after the tool is fully deployed.
   create a rule to delete the older files.
 - In case you need to delete datastore entities, you’ll need to create your own
   script to query entities to be deleted and iterate through them.
-- In case you need to delete daily BigQuery sharded tables, you can use the
-script `_delete_daily_tables.sh_` included in the utils directory
+- BigQuery sharded tables have a default expiration date of 30 days, which is
+  defined in the `terraform/main.tf` file. You can modify this value in the file
+  and deploy it, or manually in the dataset definition in the cloud console.
 
 
 ## Troubleshooting

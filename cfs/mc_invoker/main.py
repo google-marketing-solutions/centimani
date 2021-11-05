@@ -295,7 +295,7 @@ def _upload_products(service: discovery.Resource, env_info: Dict[str, Any],
     input_json = job_info['input_json']
     pubsub_payload = _add_errors_to_input_data(input_json,
                                                input_json['child']['num_rows'])
-    _send_pubsub_message(env_info[PROJECT_ID], env_info[REPORTING_TOPIC],
+    _send_pubsub_message(env_info[PROJECT_ID], env_info[FULL_PATH_TOPIC],
                          pubsub_payload)
     # If last try, move blob to /slices_failed
     _mv_blob_if_last_try(task_retries, env_info[MAX_ATTEMPTS], input_json,
@@ -400,7 +400,7 @@ def _mc_invoker_worker(service: discovery.Resource, env_info: Dict[str, Any],
     return result
   else:
     input_json['child']['num_errors'] = input_json['child']['num_rows']
-    _send_pubsub_message(env_info[PROJECT_ID], env_info[REPORTING_TOPIC],
+    _send_pubsub_message(env_info[PROJECT_ID], env_info[FULL_PATH_TOPIC],
                          input_json)
     return 200
 
@@ -552,7 +552,7 @@ def mc_invoker(request):
         <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
   """
   required_elem = [
-      'OUTPUT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT', 'STORE_RESPONSE_STATS_TOPIC',
+      'OUTPUT_GCS_BUCKET', 'PROJECT_ID', 'STORE_RESPONSE_STATS_TOPIC',
       'DEPLOYMENT_NAME', 'SOLUTION_PREFIX', 'CACHE_TTL_IN_HOURS'
   ]
   if not all(elem in os.environ for elem in required_elem):
@@ -562,7 +562,7 @@ def mc_invoker(request):
 
   env_info = {
       BUCKET_NAME: os.environ['OUTPUT_GCS_BUCKET'],
-      PROJECT_ID: os.environ['DEFAULT_GCP_PROJECT'],
+      PROJECT_ID: os.environ['PROJECT_ID'],
       DEPLOYMENT_NAME: os.environ['DEPLOYMENT_NAME'],
       SOLUTION_PREFIX: os.environ['SOLUTION_PREFIX'],
       REPORTING_TOPIC: os.environ['STORE_RESPONSE_STATS_TOPIC'],
@@ -676,7 +676,7 @@ def _test_main() -> None:
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
-      'OUTPUT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT', 'STORE_RESPONSE_STATS_TOPIC',
+      'OUTPUT_GCS_BUCKET', 'PROJECT_ID', 'STORE_RESPONSE_STATS_TOPIC',
       'CACHE_TTL_IN_HOURS'
   ]):
     print('Cannot proceed, there are missing input values, '
@@ -685,7 +685,7 @@ def _test_main() -> None:
 
   env_info = {
       BUCKET_NAME: os.environ['OUTPUT_GCS_BUCKET'],
-      PROJECT_ID: os.environ['DEFAULT_GCP_PROJECT'],
+      PROJECT_ID: os.environ['PROJECT_ID'],
       DEPLOYMENT_NAME: os.environ['DEPLOYMENT_NAME'],
       SOLUTION_PREFIX: os.environ['SOLUTION_PREFIX'],
       REPORTING_TOPIC: os.environ['STORE_RESPONSE_STATS_TOPIC'],

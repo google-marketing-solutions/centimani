@@ -28,7 +28,7 @@ from google.cloud.functions_v1.context import Context
 import numpy as np
 import pandas as pd
 
-DEFAULT_GCP_PROJECT = os.getenv("DEFAULT_GCP_PROJECT", "")
+PROJECT_ID = os.getenv("PROJECT_ID", "")
 BQ_REPORTING_DATASET = os.getenv("BQ_REPORTING_DATASET", "")
 BQ_REPORTING_TABLE = os.getenv("BQ_REPORTING_TABLE", "")
 
@@ -42,7 +42,7 @@ def _get_data_from_datastore(current_date: str) -> pd.DataFrame:
     A dataframe containing all data extracted from Datastore
   """
 
-  db = store.Client(DEFAULT_GCP_PROJECT)
+  db = store.Client(PROJECT_ID)
   ancestor = db.key("processing_date", current_date)
   query = db.query(kind="child_file", ancestor=ancestor)
   results = list(query.fetch())
@@ -139,7 +139,7 @@ def main(event: Dict[str, Any], context=Optional[Context]):
   del event
 
   date = datetime.date.today().strftime("%Y%m%d")
-  table_name = f"{DEFAULT_GCP_PROJECT}.{BQ_REPORTING_DATASET}.{BQ_REPORTING_TABLE}_{date}"
+  table_name = f"{PROJECT_ID}.{BQ_REPORTING_DATASET}.{BQ_REPORTING_TABLE}_{date}"
 
   df = _get_data_from_datastore(date)
 
@@ -169,7 +169,7 @@ def _test_get_data_from_datastore():
     None
   """
   date = "YYYYMMDD"
-  table_name = f"{DEFAULT_GCP_PROJECT}.{BQ_REPORTING_DATASET}.{BQ_REPORTING_TABLE}_{date}"
+  table_name = f"{PROJECT_ID}.{BQ_REPORTING_DATASET}.{BQ_REPORTING_TABLE}_{date}"
   df = _get_data_from_datastore(date)
 
   if not df.empty:

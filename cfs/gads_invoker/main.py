@@ -590,7 +590,7 @@ def gads_invoker(request):
         <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
   """
   required_elem = [
-      'OUTPUT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
+      'OUTPUT_GCS_BUCKET', 'PROJECT_ID',
       'STORE_RESPONSE_STATS_TOPIC', 'DEPLOYMENT_NAME', 'SOLUTION_PREFIX',
       'CACHE_TTL_IN_HOURS'
   ]
@@ -600,7 +600,7 @@ def gads_invoker(request):
     sys.exit(1)
 
   bucket_name = os.environ['OUTPUT_GCS_BUCKET']
-  project_id = os.environ['DEFAULT_GCP_PROJECT']
+  project_id = os.environ['PROJECT_ID']
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
   reporting_topic = os.environ['STORE_RESPONSE_STATS_TOPIC']
@@ -665,7 +665,7 @@ def  _test_main() -> None:
   input_json = json.loads(input_string)
 
   if not all(elem in os.environ for elem in [
-      'OUTPUT_GCS_BUCKET', 'DEFAULT_GCP_PROJECT',
+      'OUTPUT_GCS_BUCKET', 'PROJECT_ID',
       'STORE_RESPONSE_STATS_TOPIC', 'CACHE_TTL_IN_HOURS'
   ]):
     print('Cannot proceed, there are missing input values, '
@@ -673,7 +673,7 @@ def  _test_main() -> None:
     sys.exit(1)
 
   bucket_name = os.environ['OUTPUT_GCS_BUCKET']
-  project_id = os.environ['DEFAULT_GCP_PROJECT']
+  project_id = os.environ['PROJECT_ID']
   deployment_name = os.environ['DEPLOYMENT_NAME']
   solution_prefix = os.environ['SOLUTION_PREFIX']
   cache_ttl_in_hours = int(os.environ['CACHE_TTL_IN_HOURS'])
