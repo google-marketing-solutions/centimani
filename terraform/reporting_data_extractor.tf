@@ -74,6 +74,7 @@ resource "google_cloud_scheduler_job" "job" {
   name        = "${var.DEPLOYMENT_NAME}_${var.SOLUTION_PREFIX}_reporting_data_extractor"
   description = "Centimani Reporting Data Extractor Schedule"
   schedule    = "*/2 * * * *"
+  depends_on  = [resource.google_app_engine_application.app]
 
   pubsub_target {
     topic_name = google_pubsub_topic.reporting_data_extractor.id
