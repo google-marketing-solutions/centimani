@@ -49,6 +49,9 @@ CACHE_TTL_IN_HOURS = 'cache_ttl_in_hours'
 FULL_PATH_TOPIC = 'full_path_topic'
 MAX_ATTEMPTS = 'max_attempts'
 
+ITEM_NOT_FOUND_MSG = 'item not found'
+DELETE_METHOD = 'delete'
+
 
 class NonRetryableError(Exception):
   """Exception raised for errors that shouldn't be retried.
@@ -78,11 +81,13 @@ class RetryableError(Exception):
     super().__init__(self.message)
 
 
-def _count_partial_errors(response: str):
+def _count_partial_errors(response: str, entries_dict: Dict[int, Dict[str, Any]]):
   """Counts the partial errors in the Content API response.
 
   Args:
       response: Content API upload response.
+      entries_dict: Dictionary with the entries batchid as key and a dictionary 
+      with the batchid's characteristics as value.
 
   Returns:
       An integer representing the total number of partial errors in the response
@@ -99,26 +104,33 @@ def _count_partial_errors(response: str):
     entries = response['entries']
     for entry in entries:
       errors = entry.get('errors')
+      batchId=entry['batchId']
       if errors:
-        print('Errors for batch entry %d:' % entry['batchId'])
-        print('A partial failure for batch entry '
-              f'{entry["batchId"]} occurred. Error messages are shown below.')
+        if len(errors['errors'])==1 and errors['errors'][0]['message']==ITEM_NOT_FOUND_MSG and entries_dict[batchId]['method']==DELETE_METHOD:
+          continue
+        else:
+          print('Errors for batch entry %d:' % entry['batchId'])
+          print('A partial failure for batch entry '
+                f'{entry["batchId"]} occurred. Error messages are shown below.')
 
-        for error in errors['errors']:
-          error_count += 1
-          error_message = error['message']
-          domain = error['domain']
-          reason = error['reason']
+          for error in errors['errors']:
+            if error['message']==ITEM_NOT_FOUND_MSG and entries_dict[batchId]['method']==DELETE_METHOD:
+              continue
+            else:
+              error_count += 1
+              error_message = error['message']
+              domain = error['domain']
+              reason = error['reason']
 
-          error_code = f'{error_message}_{domain}_{reason}'
-          if error_code not in error_stats:
-            error_stats[error_code] = {'count': 0}
-            error_stats[error_code]['message'] = error_message
-          error_stats[error_code]['count'] += 1
+              error_code = f'{error_message}_{domain}_{reason}'
+              if error_code not in error_stats:
+                error_stats[error_code] = {'count': 0}
+                error_stats[error_code]['message'] = error_message
+              error_stats[error_code]['count'] += 1
 
-          print(f' Error message: {error["message"]}, '
-                f'domain: {error["domain"]}, '
-                f'reason: {error["reason"]}')
+              print(f' Error message: {error["message"]}, '
+                    f'domain: {error["domain"]}, '
+                    f'reason: {error["reason"]}')
 
     for code_key in error_stats:
       error_array.append({
@@ -270,9 +282,11 @@ def _upload_products(service: discovery.Resource, env_info: Dict[str, Any],
   """
 
   try:
+    entries_dict = batch_dictionary(products)
+
     response = _send_products_in_batch(service, products)
     if response:
-      num_partial_errors, error_array = _count_partial_errors(response)
+      num_partial_errors, error_array = _count_partial_errors(response, entries_dict)
       pubsub_payload = _add_errors_to_input_data(job_info['input_json'],
                                                  num_partial_errors)
       if error_array:
@@ -495,6 +509,26 @@ def initialize_service(auth_config):
         'any Merchant Center accounts.')
 
   return service
+
+
+def batch_dictionary(products: List[Dict[str, Any]]):
+  """Creates dictionary with the entries info for error control.
+
+  Args:
+    products: Chunk of products prepared to be uploaded.
+
+  Returns:
+    Dictionary with the batchId as key and the method as value.
+  """
+
+  entries_dict = {}
+  for product in products:
+    batch_num = product['batchId']
+    entries_dict[batch_num] = {
+      'method': product['method']
+    }
+
+  return entries_dict
 
 
 def _send_products_in_batch(service: discovery.Resource,
