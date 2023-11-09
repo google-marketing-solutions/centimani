@@ -19,4 +19,4 @@ google-cloud-bigquery==2.21.0
 google-cloud-firestore==2.1.3
 google-cloud-datastore==2.1.4
 pandas==1.3.0
-pyarrow==4.0.1
+pyarrow==14.0.1
